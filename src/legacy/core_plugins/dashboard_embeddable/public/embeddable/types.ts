@@ -1,0 +1,88 @@
+/*
+ * Licensed to Elasticsearch B.V. under one or more contributor
+ * license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright
+ * ownership. Elasticsearch B.V. licenses this file to you under
+ * the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { Filters, Query, RefreshConfig, TimeRange, ViewMode } from 'ui/embeddable';
+
+export interface ViewState {
+  readonly viewMode: ViewMode;
+  readonly isFullScreenMode: boolean;
+  readonly maximizedPanelId?: string;
+  readonly visibleContextMenuPanelId?: string;
+  readonly timeRange: TimeRange;
+  readonly refreshConfig: RefreshConfig;
+  readonly hidePanelTitles: boolean;
+  readonly useMargins: boolean;
+  readonly query: Query;
+  readonly filters: Filters;
+}
+
+export interface GridData {
+  readonly w: number;
+  readonly h: number;
+  readonly x: number;
+  readonly y: number;
+  readonly i: string;
+}
+
+export type PanelId = string;
+export type SavedObjectId = string;
+
+export interface PanelState {
+  readonly id: SavedObjectId;
+  readonly version: string;
+  readonly type: string;
+  panelIndex: PanelId;
+  readonly embeddableConfig: any;
+  readonly gridData: GridData;
+  readonly title?: string;
+}
+
+export interface EmbeddableReduxState {
+  readonly editUrl?: string;
+  readonly indexPatterns?: object[];
+  readonly type?: string;
+  readonly title?: string;
+  readonly error?: string | object;
+  readonly initialized: boolean;
+  readonly stagedFilter?: object;
+  /**
+   * Timestamp of the last time this embeddable was requested to reload.
+   */
+  readonly lastReloadRequestTime: number;
+}
+
+export interface PanelStateMap {
+  readonly [panelId: string]: PanelState;
+}
+
+export interface EmbeddablesMap {
+  readonly [panelId: string]: EmbeddableReduxState;
+}
+
+export interface DashboardMetadata {
+  readonly title: string;
+  readonly description?: string;
+}
+
+export interface DashboardState {
+  readonly view: ViewState;
+  readonly panels: PanelStateMap;
+  readonly embeddables: EmbeddablesMap;
+  readonly metadata: DashboardMetadata;
+}

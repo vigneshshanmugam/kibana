@@ -21,21 +21,49 @@ import 'ui/doc_table';
 
 import { i18n } from '@kbn/i18n';
 import { EmbeddableFactory } from 'ui/embeddable';
-import {
-  EmbeddableInstanceConfiguration,
-  OnEmbeddableStateChanged,
-} from 'ui/embeddable/embeddable_factory';
+import { EmbeddableInstanceConfiguration, OnEmbeddableStateChanged } from 'ui/embeddable';
+import { ErrorEmbeddable } from 'ui/embeddable/embeddables/error_embeddable';
 import { SavedSearchLoader } from '../types';
-import { SearchEmbeddable } from './search_embeddable';
+import { SearchEmbeddable, SearchInput, SearchOutput } from './search_embeddable';
 
-export class SearchEmbeddableFactory extends EmbeddableFactory {
+export const SEARCH_EMBEDDABLE_TYPE = 'search';
+
+export const SEARCH_OUTPUT_SPEC = {
+  ['title']: {
+    displayName: 'Title',
+    description: 'The title of the element',
+    accessPath: 'element.title',
+    id: 'title',
+  },
+  ['timeRange']: {
+    displayName: 'Time range',
+    description: 'The time range. Object type that has from and to nested properties.',
+    accessPath: 'element.timeRange',
+    id: 'timeRange',
+  },
+  ['filters']: {
+    displayName: 'Filters',
+    description: 'The filters applied to the current view',
+    accessPath: 'element.filters',
+    id: 'filters',
+  },
+  ['query']: {
+    displayName: 'Query',
+    description: 'The query applied to the current view',
+    accessPath: 'element.query',
+    id: 'query',
+  },
+};
+
+export class SearchEmbeddableFactory extends EmbeddableFactory<SearchInput, SearchOutput> {
   constructor(
     private $compile: ng.ICompileService,
     private $rootScope: ng.IRootScopeService,
-    private searchLoader: SavedSearchLoader
+    private searchLoader: SavedSearchLoader,
+    private courier: any
   ) {
     super({
-      name: 'search',
+      name: SEARCH_EMBEDDABLE_TYPE,
       savedObjectMetaData: {
         name: i18n.translate('kbn.discover.savedSearch.savedObjectName', {
           defaultMessage: 'Saved search',
@@ -50,29 +78,39 @@ export class SearchEmbeddableFactory extends EmbeddableFactory {
     return this.searchLoader.urlFor(panelId);
   }
 
+  public getOutputSpec() {
+    return SEARCH_OUTPUT_SPEC;
+  }
+
   /**
    *
-   * @param {Object} panelMetadata. Currently just passing in panelState but it's more than we need, so we should
+   * @param panelMetadata. Currently just passing in panelState but it's more than we need, so we should
    * decouple this to only include data given to us from the embeddable when it's added to the dashboard. Generally
    * will be just the object id, but could be anything depending on the plugin.
    * @param onEmbeddableStateChanged
-   * @return {Promise.<Embeddable>}
+   * @return
    */
-  public create(
-    { id }: EmbeddableInstanceConfiguration,
-    onEmbeddableStateChanged: OnEmbeddableStateChanged
-  ) {
-    const editUrl = this.getEditPath(id);
+  public create({ id, savedObjectId }: EmbeddableInstanceConfiguration, initialInput: SearchInput) {
+    if (!savedObjectId) {
+      return new ErrorEmbeddable('Need a saved object id to load search embeddable');
+    }
+
+    const editUrl = this.getEditPath(savedObjectId);
 
     // can't change this to be async / awayt, because an Anglular promise is expected to be returned.
-    return this.searchLoader.get(id).then(savedObject => {
-      return new SearchEmbeddable({
-        onEmbeddableStateChanged,
-        savedSearch: savedObject,
-        editUrl,
-        $rootScope: this.$rootScope,
-        $compile: this.$compile,
-      });
+    return this.searchLoader.get(savedObjectId).then(savedObject => {
+      return new SearchEmbeddable(
+        {
+          id,
+          courier: this.courier,
+          savedSearch: savedObject,
+          editUrl,
+          $rootScope: this.$rootScope,
+          $compile: this.$compile,
+          factory: this,
+        },
+        initialInput
+      );
     });
   }
 }

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { DashboardViewMode } from '../dashboard_view_mode';
+import { ViewMode } from 'ui/embeddable';
 import { FilterUtils } from './filter_utils';
 
 export function getAppStateDefaults(savedDashboard, hideWriteControls) {
@@ -30,7 +30,7 @@ export function getAppStateDefaults(savedDashboard, hideWriteControls) {
     options: savedDashboard.optionsJSON ? JSON.parse(savedDashboard.optionsJSON) : {},
     query: FilterUtils.getQueryFilterForDashboard(savedDashboard),
     filters: FilterUtils.getFilterBarsForDashboard(savedDashboard),
-    viewMode: savedDashboard.id || hideWriteControls ? DashboardViewMode.VIEW : DashboardViewMode.EDIT,
+    viewMode: savedDashboard.id || hideWriteControls ? ViewMode.VIEW : ViewMode.EDIT,
   };
 
   // For BWC in pre 6.1 versions where uiState was stored at the dashboard level, not at the panel level.

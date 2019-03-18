@@ -17,20 +17,37 @@
  * under the License.
  */
 
-import { EmbeddableFactoriesRegistryProvider } from 'ui/embeddable/embeddable_factories_registry';
+import {
+  embeddableFactories,
+  EmbeddableFactoriesRegistryProvider,
+  triggerRegistry,
+} from 'ui/embeddable';
+import 'ui/pager/pager_factory';
 import { IPrivate } from 'ui/private';
+import '../saved_searches';
 import { SavedSearchLoader } from '../types';
-import { SearchEmbeddableFactory } from './search_embeddable_factory';
+import { SEARCH_EMBEDDABLE_TYPE, SearchEmbeddableFactory } from './search_embeddable_factory';
 
 export function searchEmbeddableFactoryProvider(Private: IPrivate) {
   const SearchEmbeddableFactoryProvider = (
     $compile: ng.ICompileService,
     $rootScope: ng.IRootScopeService,
-    savedSearches: SavedSearchLoader
+    savedSearches: SavedSearchLoader,
+    courier: any
   ) => {
-    return new SearchEmbeddableFactory($compile, $rootScope, savedSearches);
+    const searchF = new SearchEmbeddableFactory($compile, $rootScope, savedSearches, courier);
+    embeddableFactories.registerFactory(searchF);
+    return searchF;
   };
   return Private(SearchEmbeddableFactoryProvider);
 }
 
 EmbeddableFactoriesRegistryProvider.register(searchEmbeddableFactoryProvider);
+
+export const SEARCH_ROW_CLICK_TRIGGER = 'SEARCH_ROW_CLICK_TRIGGER';
+
+triggerRegistry.registerTrigger({
+  id: SEARCH_ROW_CLICK_TRIGGER,
+  embeddableType: SEARCH_EMBEDDABLE_TYPE,
+  title: 'On row click',
+});

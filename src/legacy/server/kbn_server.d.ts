@@ -49,6 +49,7 @@ declare module 'hapi' {
     indexPatternsServiceFactory: IndexPatternsServiceFactory;
     savedObjects: SavedObjectsService;
     injectUiAppVars: (pluginName: string, getAppVars: () => { [key: string]: any }) => void;
+    getInjectedUiAppVars: (pluginName: string) => { [key: string]: any };
   }
 
   interface Request {

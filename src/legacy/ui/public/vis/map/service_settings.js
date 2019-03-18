@@ -32,7 +32,7 @@ const markdownIt = new MarkdownIt({
 const TMS_IN_YML_ID = 'TMS in config/kibana.yml';
 
 uiModules.get('kibana')
-  .service('serviceSettings', function ($http, $sanitize, mapConfig, tilemapsConfig, kbnVersion) {
+  .service('serviceSettings', function ($http, $sanitize, tilemapsConfig, kbnVersion) {
 
     const attributionFromConfig = $sanitize(markdownIt.render(tilemapsConfig.deprecated.config.options.attribution || ''));
     const tmsOptionsFromConfig = _.assign({}, tilemapsConfig.deprecated.config.options, { attribution: attributionFromConfig });
@@ -45,9 +45,9 @@ uiModules.get('kibana')
         this._emsClient = new EMSClient({
           language: i18n.getLocale(),
           kbnVersion: kbnVersion,
-          manifestServiceUrl: mapConfig.manifestServiceUrl,
+          //  manifestServiceUrl: mapConfig.manifestServiceUrl,
           htmlSanitizer: $sanitize,
-          landingPageUrl: mapConfig.emsLandingPageUrl
+          // landingPageUrl: mapConfig.emsLandingPageUrl
         });
 
       }
@@ -76,9 +76,9 @@ uiModules.get('kibana')
 
       async getFileLayers() {
 
-        if (!mapConfig.includeElasticMapsService) {
-          return [];
-        }
+        // if (!mapConfig.includeElasticMapsService) {
+        //   return [];
+        // }
 
         const fileLayers = await this._emsClient.getFileLayers();
         return fileLayers.map(fileLayer => {
@@ -116,7 +116,7 @@ uiModules.get('kibana')
         }
 
 
-        if  (mapConfig.includeElasticMapsService) {
+        if  (false) { //mapConfig.includeElasticMapsService) {
           const servicesFromManifest = await this._emsClient.getTMSServices();
           const strippedServiceFromManifest = servicesFromManifest.map((service) => {
             //shim for compatibility

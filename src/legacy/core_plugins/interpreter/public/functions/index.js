@@ -34,8 +34,14 @@ import { kibanaTable } from './table';
 import { tagcloud } from './tagcloud';
 import { vislib } from './vislib';
 import { visualization } from './visualization';
+import { navigateToDashboard } from './navigateToDashboard';
+import { navigateToUrl } from './navigateToUrl';
+import { injectContext } from './injectContext';
+import { merge } from './merge';
+import { injectQueryValue } from './injectQueryValue';
 
 export const functions = [
   clog, esaggs, kibana, kibanaContext, vega, timelionVis, tsvb, kibanaMarkdown, inputControlVis,
-  metric, kibanaPie, regionmap, tilemap, kibanaTable, tagcloud, vislib, visualization
+  metric, kibanaPie, regionmap, tilemap, kibanaTable, tagcloud, vislib, visualization, injectContext, navigateToUrl, navigateToDashboard,
+  merge, injectQueryValue
 ];

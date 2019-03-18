@@ -17,28 +17,33 @@
  * under the License.
  */
 import { EuiContextMenuItemIcon } from '@elastic/eui';
+import { Container } from 'ui/embeddable/containers';
+import { Embeddable } from 'ui/embeddable/embeddables';
 import { ContextMenuPanel } from './context_menu_panel';
 import { PanelActionAPI } from './types';
 
-interface ContextMenuActionOptions {
+interface ContextMenuActionOptions<
+  E extends Embeddable = Embeddable,
+  C extends Container = Container
+> {
   /**
    * An optional child context menu to display when the action is clicked.
    */
-  childContextMenuPanel?: ContextMenuPanel;
+  childContextMenuPanel?: ContextMenuPanel<E, C>;
 
   /**
    * Whether this action should be disabled based on the parameters given.
    * @param {PanelActionAPI} panelActionAPI
    * @return {boolean}
    */
-  isDisabled?: (actionAPI: PanelActionAPI) => boolean;
+  isDisabled?: (actionAPI: PanelActionAPI<E, C>) => boolean;
 
   /**
    * Whether this action should be visible based on the parameters given.
    * @param {PanelActionAPI} panelActionAPI
    * @return {boolean}
    */
-  isVisible?: (panelActionAPI: PanelActionAPI) => boolean;
+  isVisible?: (panelActionAPI: PanelActionAPI<E, C>) => boolean;
 
   /**
    * Determines which ContextMenuPanel this action is displayed on.
@@ -51,19 +56,25 @@ interface ContextMenuActionOptions {
   icon?: EuiContextMenuItemIcon;
 }
 
-interface ContextMenuButtonOptions extends ContextMenuActionOptions {
+interface ContextMenuButtonOptions<
+  E extends Embeddable<any, any>,
+  C extends Container<any, any, any>
+> extends ContextMenuActionOptions<E, C> {
   /**
    * An optional action to take when the action is clicked on. Either this or childContextMenuPanel should be
    * given.
    */
-  onClick?: (actionAPI: PanelActionAPI) => void;
+  onClick?: (actionAPI: PanelActionAPI<E, C>) => void;
 }
 
-interface ContextMenuLinkOptions extends ContextMenuActionOptions {
+interface ContextMenuLinkOptions<
+  E extends Embeddable = Embeddable,
+  C extends Container = Container
+> extends ContextMenuActionOptions<E, C> {
   /**
    * An optional href to use as navigation when the action is clicked on.
    */
-  getHref?: (actionAPI: PanelActionAPI) => string;
+  getHref?: (actionAPI: PanelActionAPI<E, C>) => string;
 }
 
 interface ContextMenuActionsConfig {
@@ -80,7 +91,7 @@ interface ContextMenuActionsConfig {
   parentPanelId: string;
 }
 
-export class ContextMenuAction {
+export class ContextMenuAction<E extends Embeddable = Embeddable, C extends Container = Container> {
   public readonly id: string;
 
   /**
@@ -96,7 +107,7 @@ export class ContextMenuAction {
   /**
    * Optional child context menu to open when the action is clicked.
    */
-  public readonly childContextMenuPanel?: ContextMenuPanel;
+  public readonly childContextMenuPanel?: ContextMenuPanel<E, C>;
 
   /**
    * Determines which ContextMenuPanel this action is displayed on.
@@ -106,12 +117,12 @@ export class ContextMenuAction {
   /**
    * @param {PanelActionAPI} panelActionAPI
    */
-  public readonly onClick?: (panelActionAPI: PanelActionAPI) => void;
+  public readonly onClick?: (panelActionAPI: PanelActionAPI<E, C>) => void;
 
   /**
    * @param {PanelActionAPI} panelActionAPI
    */
-  public readonly getHref?: (panelActionAPI: PanelActionAPI) => string;
+  public readonly getHref?: (panelActionAPI: PanelActionAPI<E, C>) => string;
 
   /**
    *
@@ -127,7 +138,7 @@ export class ContextMenuAction {
    */
   public constructor(
     config: ContextMenuActionsConfig,
-    options: ContextMenuButtonOptions | ContextMenuLinkOptions = {}
+    options: ContextMenuButtonOptions<E, C> | ContextMenuLinkOptions<E, C> = {}
   ) {
     this.id = config.id;
     this.displayName = config.displayName;
@@ -158,7 +169,7 @@ export class ContextMenuAction {
    * @param {PanelActionAPI} panelActionAPI
    * @return {boolean}
    */
-  public isVisible(panelActionAPI: PanelActionAPI): boolean {
+  public isVisible(panelActionAPI: PanelActionAPI<E, C>): boolean {
     return true;
   }
 
@@ -166,7 +177,7 @@ export class ContextMenuAction {
    * Whether this action should be disabled based on the parameters given. Defaults to always enabled.
    * @param {PanelActionAPI} panelActionAPI
    */
-  public isDisabled(panelActionAPI: PanelActionAPI): boolean {
+  public isDisabled(panelActionAPI: PanelActionAPI<E, C>): boolean {
     return false;
   }
 }

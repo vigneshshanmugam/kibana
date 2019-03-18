@@ -3,7 +3,7 @@
 /**
  * Needs to correspond with the react root nested inside angular.
  */
- dashboard-viewport-provider {
+#dashboardViewport {
   flex: 1;
   display: flex;
   [data-reactroot] {

@@ -18,9 +18,30 @@
  */
 
 import { Legacy } from 'kibana';
-import { EmbeddableFactoriesRegistryProvider } from 'ui/embeddable/embeddable_factories_registry';
+import { EmbeddableFactoriesRegistryProvider } from 'ui/embeddable';
+import { embeddableFactories } from 'ui/embeddable/embeddables/embeddable_factories_registry';
 import { IPrivate } from 'ui/private';
+import 'ui/registry/field_formats';
 import { VisTypesRegistryProvider } from 'ui/registry/vis_types';
+import 'uiExports/autocompleteProviders';
+import 'uiExports/contextMenuActions';
+import 'uiExports/devTools';
+import 'uiExports/docViews';
+import 'uiExports/embeddableFactories';
+import 'uiExports/fieldFormatEditors';
+import 'uiExports/fieldFormats';
+import 'uiExports/home';
+import 'uiExports/indexManagement';
+import 'uiExports/inspectorViews';
+import 'uiExports/savedObjectTypes';
+import 'uiExports/search';
+import 'uiExports/shareContextMenuExtensions';
+import 'uiExports/visEditorTypes';
+import 'uiExports/visRequestHandlers';
+import 'uiExports/visResponseHandlers';
+import 'uiExports/visTypes';
+import 'uiExports/visualize';
+import '../saved_visualizations';
 import { SavedVisualizations } from '../types';
 import { VisualizeEmbeddableFactory } from './visualize_embeddable_factory';
 
@@ -29,11 +50,13 @@ export function visualizeEmbeddableFactoryProvider(Private: IPrivate) {
     savedVisualizations: SavedVisualizations,
     config: Legacy.KibanaConfig
   ) => {
-    return new VisualizeEmbeddableFactory(
+    const visF = new VisualizeEmbeddableFactory(
       savedVisualizations,
       config,
       Private(VisTypesRegistryProvider)
     );
+    embeddableFactories.registerFactory(visF);
+    return visF;
   };
   return Private(VisualizeEmbeddableFactoryProvider);
 }

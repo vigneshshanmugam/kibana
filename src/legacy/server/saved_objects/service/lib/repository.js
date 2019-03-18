@@ -90,6 +90,7 @@ export class SavedObjectsRepository {
     const time = this._getCurrentTime();
 
     try {
+      console.log('migrating doc');
       const migrated = this._migrator.migrateDocument({
         id,
         type,
@@ -102,6 +103,7 @@ export class SavedObjectsRepository {
 
       const raw = this._serializer.savedObjectToRaw(migrated);
 
+      console.log('write to doc, raw is ', raw);
       const response = await this._writeToCluster(method, {
         id: raw._id,
         index: this._index,
@@ -109,6 +111,7 @@ export class SavedObjectsRepository {
         body: raw._source,
       });
 
+      console.log('returning ');
       return this._rawToSavedObject({
         ...raw,
         ...response,
@@ -119,6 +122,7 @@ export class SavedObjectsRepository {
         throw errors.createEsAutoCreateIndexError();
       }
 
+      console.log('error cause ', error);
       throw error;
     }
   }

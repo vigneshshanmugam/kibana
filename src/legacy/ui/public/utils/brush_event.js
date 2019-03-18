@@ -49,11 +49,13 @@ export function onBrushEvent(event, $state) {
 
     if (to - from === 0) return;
 
-    timefilter.setTime({
-      from,
-      to,
-      mode: 'absolute'
-    });
+    $state
+
+    .timefilter.setTime({
+        from,
+        to,
+        mode: 'absolute'
+      });
   }
 
   function setRange() {

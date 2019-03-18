@@ -39,6 +39,7 @@ import { DataAdapter, RequestAdapter } from '../../inspector/adapters';
 
 import { getTableAggs } from './pipeline_helpers/utilities';
 import {
+  Filter,
   VisResponseData,
   VisSavedObject,
   VisualizeLoaderParams,
@@ -233,6 +234,8 @@ export class EmbeddedVisualizeHandler {
     if (params.hasOwnProperty('filters')) {
       fetchRequired = true;
       this.dataLoaderParams.filters = params.filters;
+
+      this.filterListener(params.filters);
     }
     if (params.hasOwnProperty('query')) {
       fetchRequired = true;
@@ -242,6 +245,10 @@ export class EmbeddedVisualizeHandler {
     if (fetchRequired) {
       this.fetchAndRender();
     }
+  }
+
+  public onFilter(filterListener: (filters: Filter[]) => void) {
+    this.filterListener = filterListener;
   }
 
   /**

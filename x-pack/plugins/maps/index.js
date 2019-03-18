@@ -44,12 +44,12 @@ export function maps(kibana) {
           isEmsEnabled: mapConfig.includeElasticMapsService,
         };
       },
-      embeddableFactories: [
-        'plugins/maps/embeddable/map_embeddable_factory_provider'
-      ],
-      inspectorViews: [
-        'plugins/maps/inspector/views/register_views',
-      ],
+      // embeddableFactories: [
+      //   'plugins/maps/embeddable/map_embeddable_factory_provider'
+      // ],
+      // inspectorViews: [
+      //   'plugins/maps/inspector/views/register_views',
+      // ],
       home: ['plugins/maps/register_feature'],
       styleSheetPaths: `${__dirname}/public/index.scss`,
       savedObjectSchemas: {

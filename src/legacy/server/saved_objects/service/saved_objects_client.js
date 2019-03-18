@@ -106,6 +106,7 @@ export class SavedObjectsClient {
    * @returns {promise} - { id, type, version, attributes }
    */
   async create(type, attributes = {}, options = {}) {
+    console.log('in create for type ' + type);
     return this._repository.create(type, attributes, options);
   }
 

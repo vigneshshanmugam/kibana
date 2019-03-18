@@ -17,20 +17,24 @@
  * under the License.
  */
 
-import { ContainerState, Embeddable } from 'ui/embeddable';
+import { Embeddable } from 'ui/embeddable';
+import { Container } from 'ui/embeddable/containers';
 
 /**
  * Exposes information about the current state of the panel and the embeddable rendered internally.
  */
-export interface PanelActionAPI {
+export interface PanelActionAPI<
+  E extends Embeddable = Embeddable,
+  C extends Container = Container
+> {
   /**
    * The embeddable that resides inside this action. It's possible it's undefined if the embeddable has not been returned from
    * the EmbeddableFactory yet.
    */
-  embeddable?: Embeddable;
+  embeddable: E;
 
   /**
    * Information about the current state of the panel and dashboard.
    */
-  containerState: ContainerState;
+  container: C;
 }

@@ -55,6 +55,7 @@ export interface VisSavedObject {
   title: string;
   uiStateJSON?: string;
   destroy: () => void;
+  id: string;
 }
 
 interface VisResponseValue {

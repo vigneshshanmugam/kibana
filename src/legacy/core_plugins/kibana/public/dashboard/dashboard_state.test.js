@@ -18,7 +18,6 @@
  */
 
 import { DashboardStateManager } from './dashboard_state_manager';
-import { DashboardViewMode } from './dashboard_view_mode';
 import { embeddableIsInitialized, setPanels } from './actions';
 import { getAppStateMock, getSavedDashboardMock } from './__tests__';
 import { store } from '../store';
@@ -96,13 +95,13 @@ describe('DashboardState', function () {
     });
 
     test('getIsDirty is true if isDirty is true and editing', () => {
-      dashboardState.switchViewMode(DashboardViewMode.EDIT);
+      dashboardState.switchViewMode(ViewMode.EDIT);
       dashboardState.isDirty = true;
       expect(dashboardState.getIsDirty()).toBeTruthy();
     });
 
     test('getIsDirty is false if isDirty is true and editing', () => {
-      dashboardState.switchViewMode(DashboardViewMode.VIEW);
+      dashboardState.switchViewMode(ViewMode.VIEW);
       dashboardState.isDirty = true;
       expect(dashboardState.getIsDirty()).toBeFalsy();
     });

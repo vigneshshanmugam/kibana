@@ -37,12 +37,12 @@ describe('service_settings (FKA tilemaptest)', function () {
   const manifestUrl2 = 'https://foobar_override/v1/manifest';
 
   beforeEach(ngMock.module('kibana', ($provide) => {
-    $provide.decorator('mapConfig', () => {
-      return {
-        manifestServiceUrl: manifestUrl,
-        includeElasticMapsService: true
-      };
-    });
+    // $provide.decorator('mapConfig', () => {
+    //   return {
+    //     manifestServiceUrl: manifestUrl,
+    //     includeElasticMapsService: true
+    //   };
+    // });
   }));
 
 
@@ -62,7 +62,7 @@ describe('service_settings (FKA tilemaptest)', function () {
         return EMS_FILES;
       }
     });
-    mapConfig = $injector.get('mapConfig');
+    // mapConfig = $injector.get('mapConfig');
     tilemapsConfig = $injector.get('tilemapsConfig');
 
     manifestServiceUrlOriginal = mapConfig.manifestServiceUrl;
