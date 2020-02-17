@@ -35,6 +35,7 @@ import { StickySpanProperties } from './StickySpanProperties';
 import { HttpInfoSummaryItem } from '../../../../../../shared/Summary/HttpInfoSummaryItem';
 import { SpanMetadata } from '../../../../../../shared/MetadataTable/SpanMetadata';
 import { SyncBadge } from '../SyncBadge';
+import { AutoSizedFlameGraph } from './AutoSizedFlamegraph';
 
 function formatType(type: string) {
   switch (type) {
@@ -87,6 +88,98 @@ interface Props {
   onClose: () => void;
 }
 
+function createFlameGraphNode(name, value) {
+  const actualName = name.split('$#')[0];
+  return {
+    name: actualName,
+    value,
+    children: [],
+    selfTime: 0
+  };
+}
+
+function getFlameGraphData(data) {
+  const map = new Map();
+  const { culprits, name, duration } = data;
+  const rootNode = createFlameGraphNode(`${name}`, duration);
+  let currLevel = null;
+  /**
+   * Merge frames on all stacks together
+   */
+  const updateMap = (key, totalTime) => {
+    if (!map.has(key)) {
+      map.set(key, {
+        children: [],
+        totalTime: 0,
+        seen: false
+      });
+    }
+    const value = map.get(key);
+    if (currLevel) {
+      if (value.totalTime + totalTime <= currLevel.totalTime) {
+        value.totalTime += totalTime;
+      }
+      if (currLevel.children.indexOf(key) === -1) {
+        currLevel.children.push(key);
+      }
+    } else {
+      value.totalTime += totalTime;
+    }
+    currLevel = value;
+  };
+
+  for (const culprit of culprits) {
+    const { totalTime, frames } = culprit;
+
+    if (frames.length > 0) {
+      currLevel = null;
+    } else {
+      if (currLevel) {
+        const key = `stack-unavailable$#${data.start}`;
+        updateMap(key, totalTime);
+      }
+      continue;
+    }
+
+    for (let depth = 0; depth < frames.length; depth++) {
+      const frame = frames[depth];
+      const key = `${frame}$#${depth}`;
+      updateMap(key, totalTime);
+    }
+  }
+
+  const bfs = (currFrame, currentValue, rootNode) => {
+    const node = createFlameGraphNode(currFrame, currentValue.totalTime);
+    if (rootNode.selfTime > 0) {
+      rootNode.selfTime = rootNode.selfTime - node.value;
+    } else {
+      rootNode.selfTime = rootNode.value - node.value;
+    }
+    const currentChildFrames = currentValue.children;
+    if (currentChildFrames.length === 0) {
+      node.selfTime = node.value;
+    }
+    rootNode.children.push(node);
+
+    for (const frame of currentChildFrames) {
+      const nodeValue = map.get(frame);
+      bfs(frame, nodeValue, node);
+    }
+    currentValue.seen = true;
+  };
+
+  /**
+   * Combine the frames in to flamegraph chart data
+   */
+  for (const [key, value] of map.entries()) {
+    if (value.seen) {
+      continue;
+    }
+    bfs(key, value, rootNode);
+  }
+  return rootNode;
+}
+
 export function SpanFlyout({
   span,
   parentTransaction,
@@ -98,6 +191,12 @@ export function SpanFlyout({
   }
 
   const stackframes = span.span.stacktrace;
+  const { trace } = span.experimental;
+  const flameGraphData = {
+    start: trace.start,
+    end: trace.end,
+    data: getFlameGraphData(trace)
+  };
   const codeLanguage = parentTransaction?.service.language?.name;
   const dbContext = span.span.db;
   const httpContext = span.span.http;
@@ -197,6 +296,16 @@ export function SpanFlyout({
           <DatabaseContext dbContext={dbContext} />
           <EuiTabbedContent
             tabs={[
+              {
+                id: 'flamefraph',
+                name: 'Flamegraph',
+                content: (
+                  <Fragment>
+                    <EuiSpacer size="l" />
+                    <AutoSizedFlameGraph result={flameGraphData} height={300} />
+                  </Fragment>
+                )
+              },
               {
                 id: 'stack-trace',
                 name: i18n.translate(
