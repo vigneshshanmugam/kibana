@@ -1,0 +1,4 @@
+Diagnoses active incidents and executes remediation through available Kibana connectors.
+Use when an alert is firing, a service is degraded, or an engineer wants to act on a
+detected root cause. Covers proposal, confirmation, sequential execution, and verification.
+If no connector is configured, provides specific manual steps and connector setup guidance.

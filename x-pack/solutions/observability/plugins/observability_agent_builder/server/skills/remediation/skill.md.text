@@ -1,0 +1,483 @@
+## When to Use This Skill
+
+Use this skill when an engineer wants to act on an active incident — not just understand it:
+
+- "Fix the checkout service — it's returning 500s"
+- "Roll back the payment-api deploy"
+- "The alert fired — remediate it"
+- "Scale up the order processor, it's saturated"
+- "Take action on this incident"
+- "Execute a rollback on service X"
+- "The database connection pool is exhausted — fix it"
+- "Circuit-break the upstream dependency causing cascading failures"
+- "Create a ticket for this incident"
+- "What should I do to fix this? And do it."
+
+Do NOT use for:
+- Pure investigation with no intent to act ("why is it broken?" → use the RCA skill)
+- Log retrieval or analytics ("show me errors from the last hour")
+- Questions with no active incident or degradation
+
+---
+
+## Mandatory First Step
+
+**If `search_kis` is in your tool list, your FIRST tool call in Phase 1 MUST be
+`search_kis`. Do not call `get_logs`, `execute_esql`, or any other tool before it.**
+
+**Tool identity:** Your tool list may show a longer registry id (e.g. containing
+`platform.streams` and ending in `search_kis`). That is the same tool as
+`search_kis` in these instructions.
+
+**If `search_kis` errors** (timeout, permission, internal error): retry **once**.
+If it still fails, tell the engineer and **proceed to Phase 1 Track B** — do not block.
+
+---
+
+## Phase 1 — Diagnose
+
+Reuse the RCA methodology to establish a confirmed root cause before proposing any action.
+**Stop at confidence < 70%** — ask the engineer for more context and do not proceed to Phase 2.
+
+### Step 1-0: Extract Context
+
+Before calling any tool, read the engineer's message and note:
+- **Symptom**: what is wrong (errors, latency, crashes, saturation, data loss)
+- **Suspect**: which service, stream, host, or component
+- **Timeframe**: when it started ("since 3pm", "after the deploy", "this morning")
+- **Scope**: one service or multiple? User-facing or internal?
+
+Do not invent details not present in the message. Use them to fill in tool parameters precisely.
+
+### Step 1-1: Identify Target Stream and Time Window
+
+**Stream:** Use the service or stream name from Step 1-0 as `stream_names`. If no specific
+stream was named, call `search_kis` with no `stream_names` to discover streams with KIs,
+present the list, and ask the engineer to confirm before continuing.
+
+**Time window:** Pin a single investigation window.
+- "since 3pm" → start = today at 15:00, end = now
+- "last 2 hours" → start = now-2h, end = now
+- "this morning" → start = today at 00:00, end = now
+- No time given → default: start = now-1h, end = now
+
+Use this window consistently in all subsequent queries.
+
+### Step 1-2: Load All Knowledge Indicators
+
+Always start with a targeted call using the symptom as `search_text`:
+- `stream_names`: target stream(s) from Step 1-1
+- `search_text`: natural-language description of the symptom (e.g. "database connection pool exhaustion", "OOM killed containers")
+- `limit`: **50** when not passing `stream_names`; **20** when passing `stream_names`
+- No `kind` filter
+
+**If the targeted call returns fewer than 5 KIs**, make a second broader call with no `search_text`:
+- Same `stream_names` and `limit`
+- Merge results from both calls (deduplicate by ID) before proceeding
+
+### Step 1-3: Form Hypotheses
+
+Read **all** returned KIs and form explicit, testable hypotheses BEFORE executing any queries.
+
+> **Result ordering:** feature KIs appear before query KIs. Query KIs — often the highest-trust
+> signals — appear at the **end** of the list. Read through to the end before forming any hypothesis.
+
+Each hypothesis has four parts:
+1. **Claim**: "The [component] is failing because [specific mechanism]"
+2. **Supporting KIs**: which KIs point to this, with their weight
+3. **Confidence**: Speculative / Medium / High / Critical
+4. **Test query**: which ES|QL query would confirm or refute it
+
+**Confidence scoring heuristics:**
+
+| Evidence combination | Confidence |
+|---|---|
+| Backed query with **high** `severity_score` + corroborating `error_logs` feature with **high** `confidence` | Critical |
+| Backed query with **high** `severity_score` alone | High |
+| `error_logs` feature with **high** `confidence` alone | High |
+| Non-backed query with **high** `severity_score` + supporting `log_patterns` feature | Medium-High |
+| `error_logs` feature with **mid-range** `confidence` | Medium |
+| `log_patterns` feature without corroboration | Medium |
+| `dataset_analysis` anomaly | Medium |
+| `log_samples` anomaly | Low |
+
+Write out your hypotheses explicitly before testing any:
+> H1 (Critical): Payment service database connection pool is exhausted.
+>   Supporting: Query KI "DB connection pool exhaustion" (severity=88, backed=true) + Feature KI "error_logs" (confidence=91).
+>   Test: execute query KI's esql.query scoped to investigation window.
+
+### Step 1-4: Test Hypotheses — Highest Confidence First
+
+For each hypothesis, execute its test query. Stop when one is confirmed.
+
+**Execution priority:**
+- When a hypothesis cites a Query KI, its `query.esql.query` is the **primary** test: call
+  `execute_esql` (with time scoping and LIMIT rules below) **before** any `generate_esql`.
+- When a hypothesis is Feature-only, scan every Query KI returned in Step 1-2: if any query
+  clearly tests the same mechanism, run that `esql.query` via `execute_esql` first.
+- Call `generate_esql` only when no loaded Query KI supplies a suitable ES|QL.
+
+**LIMIT / row cap (required):**
+- If `LIMIT` is already present in the query, keep it.
+- If no `LIMIT` and the pipeline emits one row per document, append `| LIMIT 20` (or `| LIMIT 10` for very wide fields).
+- If the query returns a small aggregated result (`STATS` / `COUNT(*)`), no extra `LIMIT` needed.
+
+**Interpretation:**
+- Returns rows → condition is firing. Count and content confirm severity.
+- Returns 0 rows → condition is NOT active. Mark refuted and move on immediately.
+- Returns an error → try adapting the query (add time filter, fix field name). If still failing, skip.
+
+If ALL hypotheses are refuted, proceed to Track B below.
+
+### Step 1-5: Establish Timeline and Blast Radius
+
+Once a hypothesis is confirmed, run two additional queries:
+
+**Onset** — when did it start?
+Prefer adapting the confirmed Query KI pipeline with `MIN(@timestamp)` in a `STATS` clause
+and calling `execute_esql` before `generate_esql`. Cross-reference with the Feature KI's
+`last_seen` field as a sanity check.
+
+**Blast radius** — what else is affected?
+Extend the confirmed pipeline with a grouping `STATS` (e.g. by `service.name` or `host.name`).
+If the KI filter scopes to a single service, the failure may be contained; if broad, wider impact.
+
+### Step 1-6: Root Cause Statement
+
+Produce:
+- **Root Cause** (or "Most Likely Cause" if not yet confirmed)
+- **Confidence score** (0–100%). If < 70%, stop and ask for more context.
+- **Evidence table**: Source / Details / Weight
+- **Timeline**: when it started, ongoing or resolved
+- **Blast radius**: which services/components, how many events
+
+**Stop if confidence < 70%.** State what additional information would raise confidence,
+and ask the engineer to provide it. Do not proceed to Phase 2.
+
+---
+
+### Phase 1 — Track B: Log Funnel (Fallback)
+
+Enter this track if `search_kis` is not in your tool list, **failed after one retry**,
+returned no KIs after two attempts, or all KI-derived hypotheses were explicitly refuted.
+
+**Phase B-1 — Initial Peek:**
+Call `get_logs` with no `groupBy`. Scope with `kqlFilter` if the engineer named a service.
+Read: `totalCount` (noise indicator), `histogram` (spike location), `samples` (real errors?),
+`categories` (< 20 = focused enough), `topValues` (use exact values in subsequent KQL filters).
+
+Decision: < 20 categories → Answer. Spike visible → Phase B-2. ≥ 20 noisy → Phase B-2.
+
+**Phase B-2 — Log Rate Analysis:**
+Call `run_log_rate_analysis`.
+- Spike visible: baseline = before spike, deviation = during spike.
+- User named a time: use that as the boundary.
+- No spike/context: baseline = now-2h to now-1h, deviation = now-1h to now.
+
+If it returns nothing (steady-state), go to Phase B-3.
+
+**Phase B-3 — Reduce Noise:**
+Call `get_logs` repeatedly. Two strategies:
+- **Exclude noise**: accumulate NOT clauses (never drop previous ones). `NOT message: "GET /health"`
+- **Zoom into signal**: once you identify the signal, switch to positive filter. `service.name: "checkout" AND log.level: "error"`
+Use exact values from `topValues`. Call `get_logs` at least 3 times before answering.
+
+Produce the same root cause statement, evidence, timeline, and blast radius as Step 1-6.
+Apply the same 70% confidence threshold before proceeding to Phase 2.
+
+---
+
+## Phase 2 — Discover & Propose
+
+Only enter Phase 2 when confidence ≥ 70%.
+
+### Step 2-1: Classify Action Type
+
+Map the confirmed root cause to one of these action types:
+
+| Action Type | When to use |
+|---|---|
+| `ROLLBACK` | Error spike traceable to a recent deployment (within the last 2 hours) |
+| `SCALE` | CPU, memory, queue, or connection pool saturation |
+| `CIRCUIT_BREAK` | Upstream dependency failure causing cascading errors downstream |
+| `CONFIG_CHANGE` | Misconfiguration revealed in KI or ES|QL evidence |
+| `TICKET_ONLY` | No safe automated action available; incident requires human judgment |
+
+When multiple action types apply, prefer the more reversible one:
+**ROLLBACK > SCALE > CIRCUIT_BREAK > CONFIG_CHANGE > TICKET_ONLY**
+
+### Step 2-2: Inventory Available Workflow Tools
+
+Read every workflow tool you have been configured with:
+- Tool name and description
+- Input schema (what parameters it accepts)
+- What it does (what service it calls, what it changes)
+
+Do NOT assume capabilities beyond what the tool description explicitly states.
+Do NOT invent tool names.
+
+### Step 2-3: Match Action to Workflow
+
+For each required action:
+1. Find the best matching workflow tool based on action type and tool description.
+2. If no tool matches, mark the action as `MANUAL` — it will appear in the fallback section.
+3. Extract ALL required parameters from investigation evidence. Never invent a value.
+   - `service_name` ← alert context, ES|QL result, or stream name
+   - `namespace` ← `kubernetes.namespace` field or alert metadata
+   - `target_version` ← KI deployment event or previous image tag found in logs
+   - `environment` ← stream name or log fields
+   - Any other parameter the tool schema requires
+
+If a required parameter cannot be sourced from the evidence, name it explicitly and ask
+the engineer to supply it. Do not proceed until all parameters are known.
+
+### Step 2-4: Present Structured Plan
+
+Present the full remediation plan before doing anything:
+
+**Root Cause:** [one sentence, confidence %]
+**Blast Radius:** [which services / how many events]
+**Timeline:** [when it started / ongoing or resolved]
+
+**Proposed Actions** (in order — most reversible first):
+
+For each action:
+- **Action N**: [action type] — [what will happen in plain English]
+  - Workflow: [tool name] (or MANUAL if no tool available)
+  - Parameters: [each parameter and its source from evidence]
+  - Expected outcome: [what should improve and how you will verify it]
+  - Risk level: Low / Medium / High — [one sentence rationale]
+  - Fallback if declined: [what to do instead]
+
+Ask the engineer: "Shall I proceed with Action 1 first? Please confirm or decline each action."
+
+---
+
+## Phase 3 — Confirm & Execute
+
+**One action at a time. Never execute in parallel. Never skip confirmation.**
+
+### Step 3-1: Confirm Before Every Action
+
+Before calling any workflow tool:
+1. State exactly what tool will be called, with exactly what parameters.
+2. State the expected outcome and risk level.
+3. Wait for the engineer to explicitly respond.
+
+On **approval**: proceed to Step 3-2.
+On **decline**: STOP immediately. Do not proceed to the next action.
+  - Summarise what has run vs what has not.
+  - State current incident status based on last ES|QL result.
+  - Ask what the engineer would like to do instead.
+On **no response / ambiguity**: ask again clearly. Do not interpret silence as approval.
+
+### Step 3-2: Execute and Verify
+
+1. Call the workflow tool with the confirmed parameters.
+2. Report the result verbatim (success response or error message).
+3. Wait 60–90 seconds for the action to take effect (state this explicitly).
+4. Re-run the diagnostic ES|QL from Phase 1 against the same investigation window extended to now.
+5. Compare to the pre-action baseline:
+   - Error count before: N. Error count after: M. Delta: N-M (improvement / no change / regression).
+   - If the signal improved: state by how much and whether the incident is resolved.
+   - If the signal is unchanged after 5 minutes: report this honestly — do not retry automatically.
+     Ask the engineer how to proceed.
+   - If the signal worsened: report immediately and stop. Propose rollback of the action if applicable.
+
+### Step 3-3: On Workflow Error
+
+If the workflow tool returns an error:
+- Report the error verbatim.
+- Do NOT retry automatically.
+- Ask the engineer: "The workflow returned an error. Shall I retry, try a different action, or stop?"
+
+### Step 3-4: Completion
+
+After all approved actions are executed and verified:
+- State whether the incident is resolved, partially resolved, or unresolved.
+- If resolved: summarise what was done, what the evidence shows, and recommend a post-incident review.
+- If unresolved: state what was tried, what the current signal shows, and what the next options are.
+- If the incident resolved before all proposed actions completed: stop and say so explicitly.
+  Do not execute remaining actions unnecessarily.
+
+---
+
+## Fallback — No Connector Available
+
+When no workflow tool matches the required action type:
+
+### Manual Commands
+
+Provide exact, copy-pasteable commands with real values from the diagnosis — no placeholders.
+Use the actual service name, namespace, image tag, or replica count from the evidence.
+
+Examples for common action types:
+
+**ROLLBACK:**
+```
+kubectl rollout undo deployment/<service_name> -n <namespace>
+kubectl rollout status deployment/<service_name> -n <namespace>
+```
+
+**SCALE:**
+```
+kubectl scale deployment/<service_name> --replicas=<N> -n <namespace>
+```
+
+**CIRCUIT_BREAK (temporary traffic cut):**
+```
+kubectl patch virtualservice <service_name> -n <namespace> --type=merge \
+  -p '{"spec":{"http":[{"fault":{"abort":{"percentage":{"value":100},"httpStatus":503}}}]}}'
+```
+
+**CONFIG_CHANGE:**
+Provide the exact `kubectl patch` or config API call with the corrected value sourced from evidence.
+
+### Connector Setup Guidance
+
+Guide the engineer to set up a connector for future automation:
+1. In Kibana: Stack Management → Connectors → Create connector
+2. Select the connector type appropriate for the action (Webhook, Jira, ServiceNow, etc.)
+3. For Webhook connectors:
+   - URL: [the endpoint that handles this action type for your orchestration platform]
+   - Authentication: Bearer token or Basic — generate a dedicated service account credential
+   - Headers: `Content-Type: application/json`
+   - RBAC: the service account needs only the minimum scope for this action (e.g. `rollout:update` in Kubernetes RBAC)
+4. After creating the connector: Agent Builder → Workflows → Create workflow → attach the connector
+5. Assign the workflow to this agent under Agent Settings → Tools
+
+### Ticket Workflow (always use if available)
+
+If a ticket workflow tool (Jira, ServiceNow, PagerDuty) is available, always use it to create
+an incident ticket pre-populated with:
+- Full root cause statement and confidence level
+- Evidence table and ES|QL links
+- Blast radius and timeline
+- Manual steps for the engineer assigned to the ticket
+- Connector setup guidance (if no automated connector exists)
+
+---
+
+## Critical Rules
+
+1. **NEVER call a workflow tool without explicit prior engineer confirmation.** Confirmation means
+   the engineer has clearly said "yes", "proceed", "do it", or equivalent for that specific action.
+   Silence is not consent.
+
+2. **NEVER invent parameter values.** Every parameter passed to a workflow tool must trace to a
+   specific piece of investigation evidence: a KI field, an ES|QL result row, an alert field, or
+   an explicit engineer-supplied value. If a value cannot be sourced, ask.
+
+3. **ALWAYS verify with ES|QL after each action before moving to the next.** Never chain two
+   workflow calls without an intermediate verification step showing the effect of the first.
+
+4. **ALWAYS express confidence level and what drives uncertainty.** If confidence is below 70%,
+   do not enter Phase 2. If evidence is incomplete, say so explicitly.
+
+5. **Actions are sequential — never propose or execute in parallel.** Each action must be
+   confirmed, executed, and verified before the next is proposed.
+
+6. **If the incident resolves before all proposed actions complete: stop and say so.** Do not
+   execute remaining actions for completeness. Unnecessary changes are risk.
+
+7. **Prefer reversible actions first.** Rollback before config change; scale before disable.
+   If multiple actions of equal reversibility apply, prefer the one with narrower blast radius.
+
+8. **On workflow error: report verbatim, do not retry automatically.** Ask the engineer to decide.
+
+9. **Do not fabricate.** Never invent KI scores, ES|QL results, tool outputs, or service names.
+
+---
+
+## OTel Exception Events
+
+OpenTelemetry exception events have `error.exception.message` / `error.exception.type` but NO
+`log.level` or `message`. In `get_logs` results they appear as categories with `type: "exception"`.
+Filter explicitly: `error.exception.message: *`. Invisible to `log.level`-based KQL filters.
+
+---
+
+## Tips
+
+- **KQL for `kqlFilter`:** Follow the KQL (Kibana Query Language) section in the host agent's
+  system instructions when building filters for `get_logs` and related tools.
+- **ES|QL + context:** `FROM` without `STATS` / tight aggregation can return huge row sets; add
+  `| LIMIT 20` (or lower) before executing unless the query already has `LIMIT` or returns a small aggregate.
+- `log.level` is often unreliable (mixed casing, missing on OTel events). Prefer filtering by message content.
+- Use `get_index_info(operation="get-field-values", fields=["log.level"], ...)` to discover actual keyword values before filtering.
+- To inspect a specific document: `get_logs(kqlFilter="_id: \"<doc_id>\"", fields=["message","error.stack_trace"])`.
+- To see surrounding context: `get_logs` with a ±30s window around the event timestamp, scoped to the same entity, limit=50.
+
+---
+
+## Example Investigation
+
+**Engineer:** "The payment service has been throwing database errors since 2pm. Fix it."
+
+**Phase 1 — Diagnose:**
+
+Step 1-0: Symptom = database errors. Suspect = payment service. Timeframe = since 14:00.
+
+Step 1-1: stream = "payment", window = 14:00 → now.
+
+Step 1-2 (targeted): search_kis(stream_names=["payment"], search_text="database errors", limit=20)
+→ Returns 4 KIs:
+  - Feature KI F1: type="error_logs", confidence=93, description="FATAL: connection pool exhausted — all 100 slots occupied", filter={"field":"service.name","eq":"payment"}, status="active"
+  - Feature KI F2: type="log_patterns", confidence=61, description="Slow query warnings from PostgreSQL", status="stale"
+  - Query KI Q1: "DB connection pool exhaustion" (severity=88, backed=true, esql="FROM payment | WHERE error.message LIKE \"*too many connections*\" | STATS count=COUNT(*)")
+
+Step 1-3 — Hypotheses:
+> H1 (Critical): Payment service has exhausted its database connection pool.
+>   Supporting: Q1 (backed, severity=88) + F1 (error_logs, confidence=93).
+>   Test: execute Q1's esql scoped to 14:00–now.
+
+Step 1-4 — Test H1:
+execute_esql(Q1 query, time_range={from:"14:00", to:"now"})
+→ count=1,847 — firing.
+→ H1 = Confirmed.
+
+Step 1-5: MIN(@timestamp) ≈ 13:57. Blast radius: payment service only (F1 filter).
+
+Step 1-6 — Root Cause Statement:
+Root Cause (Confirmed, 92%): The payment service exhausted its PostgreSQL connection pool
+at approximately 13:57. 1,847 "too many connections" events are active. Only the payment service
+is affected. Confidence: 92% (two corroborating KIs, backed rule, live query confirmed).
+
+**Phase 2 — Discover & Propose:**
+
+Action type: SCALE (connection pool saturation — not a recent deploy, no upstream failure).
+
+Available workflow tools: `scale_deployment` (increases replica count for a Kubernetes deployment).
+
+Parameters:
+- `service_name`: "payment" (from stream name and F1 filter)
+- `namespace`: "prod" (from log field `kubernetes.namespace` = "prod" in ES|QL result)
+- `replicas`: 6 (current 3 × 2, to reduce per-replica connection load)
+
+Proposed Plan:
+> Root Cause: PostgreSQL connection pool exhausted on payment service (92% confidence).
+> Blast Radius: payment service only, 1,847 active errors.
+> Timeline: onset 13:57, ongoing.
+>
+> Action 1: SCALE — scale_deployment(service_name="payment", namespace="prod", replicas=6)
+>   Expected outcome: per-replica connection pressure halves; error rate should drop within 60–90s.
+>   Risk: Low — scaling up is fully reversible.
+>   Fallback if declined: kubectl scale deployment/payment --replicas=6 -n prod
+>
+> Shall I proceed with Action 1?
+
+**Phase 3 — Confirm & Execute:**
+
+Engineer: "Yes, proceed."
+
+Step 3-1 confirmed. Calling: scale_deployment(service_name="payment", namespace="prod", replicas=6)
+→ Result: "Deployment payment scaled to 6 replicas. Rollout in progress."
+
+Waiting 60–90 seconds for the rollout to complete...
+
+Verification — re-running Q1 ES|QL scoped to 14:00–now:
+→ count=94 — down from 1,847. Error rate dropped by 95%.
+
+**Incident is resolved.** The payment service connection pool is no longer saturated.
+Recommend post-incident review: investigate what triggered the connection surge at 13:57,
+and consider adding a connection pool size limit as a KI-backed alert.

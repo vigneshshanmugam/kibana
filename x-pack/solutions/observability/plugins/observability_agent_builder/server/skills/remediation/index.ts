@@ -1,0 +1,34 @@
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
+ */
+
+import { defineSkillType } from '@kbn/agent-builder-server/skills/type_definition';
+import { platformCoreTools } from '@kbn/agent-builder-common';
+import { OBSERVABILITY_GET_LOGS_TOOL_ID } from '../../tools/get_logs/constants';
+import { OBSERVABILITY_RUN_LOG_RATE_ANALYSIS_TOOL_ID } from '../../tools/run_log_rate_analysis/tool';
+import { OBSERVABILITY_GET_INDEX_INFO_TOOL_ID } from '../../tools/get_index_info/tool';
+import { OBSERVABILITY_GET_ALERTS_TOOL_ID } from '../../tools/get_alerts/tool';
+import remediationSkillDescription from './description.text';
+import remediationSkillContent from './skill.md.text';
+
+const REMEDIATION_TOOL_IDS = [
+  platformCoreTools.executeEsql,
+  platformCoreTools.generateEsql,
+  OBSERVABILITY_GET_LOGS_TOOL_ID,
+  OBSERVABILITY_RUN_LOG_RATE_ANALYSIS_TOOL_ID,
+  OBSERVABILITY_GET_INDEX_INFO_TOOL_ID,
+  OBSERVABILITY_GET_ALERTS_TOOL_ID,
+];
+
+export const createRemediationSkill = () =>
+  defineSkillType({
+    id: 'observability.remediation',
+    name: 'remediation',
+    basePath: 'skills/observability',
+    description: remediationSkillDescription,
+    content: remediationSkillContent,
+    getRegistryTools: () => REMEDIATION_TOOL_IDS,
+  });
