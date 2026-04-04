@@ -259,13 +259,16 @@ Ask the engineer: "Shall I proceed with Action 1 first? Please confirm or declin
 
 ### Step 3-1: Confirm Before Every Action
 
-Before calling any workflow tool:
-1. State exactly what tool will be called, with exactly what parameters.
-2. State the expected outcome and risk level.
-3. Wait for the engineer to explicitly respond.
+Before calling any workflow tool, call `request_confirmation` with:
+- `prompt_id`: a short stable string identifying this action, e.g. `"rollback-payment-service"`
+- `title`: short action label, e.g. `"Roll back payment-service to v2.4.0"`
+- `message`: full explanation — the tool name, exact parameters with their source from evidence,
+  expected outcome, risk level, and what happens if declined
 
-On **approval**: proceed to Step 3-2.
-On **decline**: STOP immediately. Do not proceed to the next action.
+Do NOT call the workflow tool until `request_confirmation` returns `"accepted"`.
+
+On **`"accepted"`**: proceed to Step 3-2.
+On **`"rejected"`**: STOP immediately. Do not proceed to the next action.
   - Summarise what has run vs what has not.
   - State current incident status based on last ES|QL result.
   - Ask what the engineer would like to do instead.
