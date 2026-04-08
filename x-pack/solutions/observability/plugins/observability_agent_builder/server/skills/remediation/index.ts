@@ -6,7 +6,11 @@
  */
 
 import { defineSkillType } from '@kbn/agent-builder-server/skills/type_definition';
-import { platformCoreTools, platformStreamsSigEventsTools } from '@kbn/agent-builder-common';
+import {
+  platformCoreTools,
+  platformStreamsSigEventsTools,
+  toolNamespaces,
+} from '@kbn/agent-builder-common';
 import { OBSERVABILITY_GET_LOGS_TOOL_ID } from '../../tools/get_logs/constants';
 import { OBSERVABILITY_RUN_LOG_RATE_ANALYSIS_TOOL_ID } from '../../tools/run_log_rate_analysis/tool';
 import { OBSERVABILITY_GET_INDEX_INFO_TOOL_ID } from '../../tools/get_index_info/tool';
@@ -24,6 +28,7 @@ const REMEDIATION_TOOL_IDS = [
   OBSERVABILITY_GET_INDEX_INFO_TOOL_ID,
   OBSERVABILITY_GET_ALERTS_TOOL_ID,
   OBSERVABILITY_REQUEST_CONFIRMATION_TOOL_ID,
+  `${toolNamespaces.workflows}.get_connectors`,
 ];
 
 export const createRemediationSkill = () =>

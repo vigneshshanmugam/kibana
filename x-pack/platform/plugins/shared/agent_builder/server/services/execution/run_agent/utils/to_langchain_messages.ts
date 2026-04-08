@@ -153,7 +153,9 @@ const formatAttachment = ({ attachment }: { attachment: ProcessedAttachment }): 
 };
 
 const formatAssistantResponse = ({ response }: { response: AssistantResponse }): AIMessage => {
-  return createAIMessage(response.message);
+  // Anthropic rejects AIMessages with empty content and no tool_calls.
+  // This can happen when the agent's response was purely an attachment with no text.
+  return createAIMessage(response.message || '...');
 };
 
 /**

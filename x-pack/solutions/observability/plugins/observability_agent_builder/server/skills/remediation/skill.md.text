@@ -25,9 +25,9 @@ Do NOT use for:
 **If `search_kis` is in your tool list, your FIRST tool call in Phase 1 MUST be
 `search_kis`. Do not call `get_logs`, `execute_esql`, or any other tool before it.**
 
-**Tool identity:** Your tool list may show a longer registry id (e.g. containing
-`platform.streams` and ending in `search_kis`). That is the same tool as
-`search_kis` in these instructions.
+**Tool identity:** Your tool list may show longer registry IDs. These are the same tools:
+- Registry ID containing `platform.streams` and ending in `search_kis` → `search_kis`
+- Registry ID containing `platform.workflows` and ending in `get_connectors` → `get_connectors`
 
 **If `search_kis` errors** (timeout, permission, internal error): retry **once**.
 If it still fails, tell the engineer and **proceed to Phase 1 Track B** — do not block.
@@ -206,27 +206,48 @@ Map the confirmed root cause to one of these action types:
 When multiple action types apply, prefer the more reversible one:
 **ROLLBACK > SCALE > CIRCUIT_BREAK > CONFIG_CHANGE > TICKET_ONLY**
 
-### Step 2-2: Inventory Available Workflow Tools
+### Step 2-2: Check Available Connectors
 
-Read every workflow tool you have been configured with:
-- Tool name and description
-- Input schema (what parameters it accepts)
-- What it does (what service it calls, what it changes)
+Call `get_connectors` to discover what is already configured in this environment.
+Filter by the `actionTypeId` that matches the action type and detected environment:
 
-Do NOT assume capabilities beyond what the tool description explicitly states.
-Do NOT invent tool names.
+| Action type + environment | `actionTypeId` to query |
+|---|---|
+| ROLLBACK / SCALE / CIRCUIT_BREAK on K8s, ArgoCD, GCP, AWS | `.webhook` |
+| ROLLBACK / SCALE via GitHub Actions pipeline | `.github` |
+| Incident notification | `.slack` |
+| Alert management | `.pagerduty` |
+| Ticket creation | `.jira` or `.servicenow` |
 
-### Step 2-3: Match Action to Workflow
+Call `get_connectors` once per action type needed. Read each result's `name` and `stepTypes`
+to understand what the connector does.
+
+**If `get_connectors` returns connectors:** one or more execution paths are available.
+Note the connector `id` — you will use it in Phase 3.
+
+**If `get_connectors` returns empty for the needed `actionTypeId`:** no connector is
+configured for this action. Mark the action `MANUAL` and go to Fallback for that action.
+
+Also check for incident management connectors (`.slack`, `.pagerduty`, `.jira`) regardless
+of the primary action type — always use them if available to notify and create a ticket.
+
+### Step 2-3: Match Action to Connector or Workflow
 
 For each required action:
-1. Find the best matching workflow tool based on action type and tool description.
-2. If no tool matches, mark the action as `MANUAL` — it will appear in the fallback section.
-3. Extract ALL required parameters from investigation evidence. Never invent a value.
-   - `service_name` ← alert context, ES|QL result, or stream name
-   - `namespace` ← `kubernetes.namespace` field or alert metadata
-   - `target_version` ← KI deployment event or previous image tag found in logs
-   - `environment` ← stream name or log fields
-   - Any other parameter the tool schema requires
+1. If `get_connectors` returned a connector for this action type → plan to use it.
+   Note: the `connector-step` execution tool is coming soon. For now, use your
+   workflow-authoring capability to create a one-step workflow using the connector ID,
+   then run it.
+2. If no connector matched → check available workflows via workflow-authoring (`list_workflows`).
+   A pre-built workflow may already exist for this action.
+3. If neither connector nor workflow is available → mark `MANUAL`.
+
+Extract ALL required parameters from investigation evidence. Never invent a value:
+- `service_name` ← alert context, ES|QL result, or stream name
+- `namespace` ← `kubernetes.namespace` field or alert metadata
+- `target_version` ← KI deployment event or previous image tag found in logs
+- `environment` ← stream name or log fields
+- `connector_id` ← from `get_connectors` result
 
 If a required parameter cannot be sourced from the evidence, name it explicitly and ask
 the engineer to supply it. Do not proceed until all parameters are known.
@@ -243,12 +264,17 @@ Present the full remediation plan before doing anything:
 
 For each action:
 - **Action N**: [action type] — [what will happen in plain English]
-  - Workflow: [tool name] (or MANUAL if no tool available)
+  - Connector: [connector name + actionTypeId] (or Workflow: [name]) (or MANUAL if neither available)
   - Parameters: [each parameter and its source from evidence]
   - Expected outcome: [what should improve and how you will verify it]
   - Risk level: Low / Medium / High — [one sentence rationale]
   - Fallback if declined: [what to do instead]
 
+**If ALL proposed actions are MANUAL** (no workflows matched any action type):
+Do NOT ask "Shall I proceed?" — skip Phase 3 entirely and go directly to the
+**Fallback — Connector Gap** section immediately.
+
+**If at least one action has a matching workflow:**
 Ask the engineer: "Shall I proceed with Action 1 first? Please confirm or decline each action."
 
 ---
@@ -259,24 +285,33 @@ Ask the engineer: "Shall I proceed with Action 1 first? Please confirm or declin
 
 ### Step 3-1: Confirm Before Every Action
 
-Before calling any workflow tool, call `request_confirmation` with:
-- `prompt_id`: a short stable string identifying this action, e.g. `"rollback-payment-service"`
-- `title`: short action label, e.g. `"Roll back payment-service to v2.4.0"`
-- `message`: full explanation — the tool name, exact parameters with their source from evidence,
-  expected outcome, risk level, and what happens if declined
+Before running any workflow, call `request_confirmation` with:
+- `prompt_id`: a short stable string identifying this specific action,
+  e.g. `"rollback-payment-api"` or `"scale-order-processor"`.
+  **Use the same value if the tool is called again for the same action.**
+- `title`: short action label shown in the UI,
+  e.g. `"Roll back payment-api to v2.4.0"`
+- `message`: the full pre-action explanation the engineer reads before deciding:
+  - Workflow tool name and what it does
+  - Exact parameters with the evidence source for each value
+  - Expected outcome (specific and measurable)
+  - Risk level and what happens on failure
+  - What you will do if the engineer declines
 
-Do NOT call the workflow tool until `request_confirmation` returns `"accepted"`.
+Do NOT run the workflow until `request_confirmation` returns `"accepted"`.
 
 On **`"accepted"`**: proceed to Step 3-2.
 On **`"rejected"`**: STOP immediately. Do not proceed to the next action.
   - Summarise what has run vs what has not.
   - State current incident status based on last ES|QL result.
   - Ask what the engineer would like to do instead.
-On **no response / ambiguity**: ask again clearly. Do not interpret silence as approval.
 
 ### Step 3-2: Execute and Verify
 
-1. Call the workflow tool with the confirmed parameters.
+1. Execute the action using the connector or workflow identified in Phase 2:
+   - **Connector path**: use your workflow-authoring capability to create a one-step workflow
+     with the connector `id` from `get_connectors`, then run it immediately.
+   - **Workflow path**: if a pre-existing workflow matches, run it directly via workflow-authoring.
 2. Report the result verbatim (success response or error message).
 3. Wait 60–90 seconds for the action to take effect (state this explicitly).
 4. Re-run the diagnostic ES|QL from Phase 1 against the same investigation window extended to now.
@@ -289,7 +324,7 @@ On **no response / ambiguity**: ask again clearly. Do not interpret silence as a
 
 ### Step 3-3: On Workflow Error
 
-If the workflow tool returns an error:
+If the workflow returns an error:
 - Report the error verbatim.
 - Do NOT retry automatically.
 - Ask the engineer: "The workflow returned an error. Shall I retry, try a different action, or stop?"
@@ -305,69 +340,362 @@ After all approved actions are executed and verified:
 
 ---
 
-## Fallback — No Connector Available
+## Fallback — Connector Gap
 
-When no workflow tool matches the required action type:
+When no available workflow matches the required action type, do not produce generic shell commands.
+Instead: infer the environment from Phase 1 evidence, identify exactly which connector is
+missing, give the engineer a specific setup guide, and provide immediate manual steps
+to stop the bleeding right now.
 
-### Manual Commands
+### Step F-1: Infer Environment from Evidence
 
-Provide exact, copy-pasteable commands with real values from the diagnosis — no placeholders.
-Use the actual service name, namespace, image tag, or replica count from the evidence.
+Read log fields and KI metadata from Phase 1. Only assert what the evidence actually shows.
 
-Examples for common action types:
+**Kubernetes signals** (any one is sufficient):
+- `kubernetes.namespace` field present in log documents
+- `orchestrator.cluster.name` or `orchestrator.type: "kubernetes"` present
+- Stream name contains `k8s`, `kube`, or a known namespace pattern
 
-**ROLLBACK:**
+**GitOps layer** (refines Kubernetes — check for these labels):
+- ArgoCD: `argocd.io/app-name` or `app.kubernetes.io/instance` label
+- Helm: `helm.sh/chart` or `app.kubernetes.io/managed-by: "Helm"` label
+- Flux: `kustomize.toolkit.fluxcd.io/name` label
+
+**Cloud provider:**
+- `cloud.provider: "aws"` or `aws.*` log fields → AWS (ECS, Lambda, or EC2)
+- `cloud.provider: "gcp"` or `gcp.*` log fields → GCP (Cloud Run, GKE, or GCE)
+- `cloud.provider: "azure"` or `azure.*` log fields → Azure (AKS, Container Apps)
+
+**Data tier:**
+- `db.system: "postgresql"` or `db.system: "mysql"` → RDBMS
+- `messaging.system: "kafka"` → Kafka
+- `db.system: "redis"` → Redis
+
+**CI/CD:**
+- KI deployment event referencing a commit SHA, PR number, or branch → GitHub or GitLab
+- KI referencing a Jenkins build number → Jenkins
+
+### Step F-2: Map Action Type to Required Connector
+
+#### ROLLBACK
+
+| Environment detected | Connector needed | Operation |
+|---|---|---|
+| ArgoCD-managed K8s | **ArgoCD** | Sync application to a pinned revision (last healthy commit) |
+| Helm-managed K8s | **Helm via CI/CD** | `helm rollback {release} {revision}` triggered through GitHub/GitLab pipeline |
+| Plain K8s (no GitOps) | **Kubernetes API** | Patch deployment to previous image tag |
+| GitHub-sourced deploy | **GitHub Actions** | Dispatch rollback workflow via `workflow_dispatch` |
+| GitLab CI deploy | **GitLab** | Trigger rollback pipeline on pinned ref |
+
+#### SCALE
+
+| Environment detected | Connector needed | Operation |
+|---|---|---|
+| K8s deployment | **Kubernetes API** | Patch deployment scale subresource |
+| GKE / GCP | **GCP** | Update node pool size or Cloud Run instance limits |
+| ECS / AWS | **AWS** | UpdateService — set `desiredCount` |
+| Cloud Run | **GCP** | Patch service `maxInstances` |
+| Azure Container Apps | **Azure** | Patch container app replica count |
+
+#### CIRCUIT_BREAK
+
+| Environment detected | Connector needed | Operation |
+|---|---|---|
+| Istio service mesh | **Kubernetes API** | Patch VirtualService — inject fault abort rule at 100% |
+| Nginx ingress | **Kubernetes API** | Patch Ingress or ConfigMap — set upstream weight to 0 |
+| Cloudflare (edge) | **Cloudflare** | Toggle firewall rule or rate-limit rule for the affected origin |
+| HAProxy / Nginx (bare metal) | **Ansible** | Run playbook to reload config with upstream disabled |
+
+#### CONFIG_CHANGE
+
+| Environment detected | Connector needed | Operation |
+|---|---|---|
+| K8s ConfigMap / Secret | **Kubernetes API** | Patch ConfigMap or Secret with corrected value |
+| Helm values | **Helm via CI/CD** | `helm upgrade --set {key}={value}` through pipeline |
+| GitOps (ArgoCD or Flux) | **GitHub / GitLab** | Open PR with corrected value — engineer merges to deploy |
+| Host configuration | **Ansible** | Run targeted playbook via AWX/AAP |
+| Terraform-managed infra | **GitHub Actions / GitLab CI** | Trigger `terraform apply -target={resource}` |
+
+#### DATA TIER
+
+| Symptom | Connector needed | Operation |
+|---|---|---|
+| PostgreSQL connection pool exhausted | **PostgreSQL** (via HTTP sidecar or Ansible) | Kill idle connections: `pg_terminate_backend` where `state = 'idle'` |
+| PostgreSQL slow query spike | **PostgreSQL** | Cancel long-running queries: `pg_cancel_backend` for queries over 30s |
+| Redis memory pressure / evictions | **Redis** (via HTTP wrapper or Ansible) | Flush targeted key namespace |
+| Kafka consumer group lag | **Kafka** (via Confluent REST or Ansible) | Reset offsets to latest or pause consumer group |
+
+#### NETWORKING & ROUTING
+
+| Symptom | Connector needed | Operation |
+|---|---|---|
+| Certificate / TLS issue | **Kubernetes API** | Patch Secret with renewed certificate |
+| DNS / CDN cache stale | **Cloudflare** | Purge cache for the affected zone or URL pattern |
+| Rate limiting flood | **Cloudflare** | Enable under-attack mode or tighten rate-limit threshold |
+
+#### SECRETS & ACCESS
+
+| Symptom | Connector needed | Operation |
+|---|---|---|
+| Leaked or expired credential | **HashiCorp Vault** | Revoke specific lease or rotate secret at the mount path |
+| Service account token expired | **Kubernetes API** | Rotate ServiceAccount token Secret |
+
+#### INCIDENT MANAGEMENT (always propose even without execution connectors)
+
+| Action | Connector needed | Operation |
+|---|---|---|
+| Notify and track | **Slack** | Post root cause + blast radius + action plan to war room channel |
+| Page on-call | **PagerDuty / OpsGenie** | Trigger incident; attach evidence; check on-call schedule |
+| Create ticket | **Jira / ServiceNow** | Create incident pre-populated with full evidence table |
+| Create issue | **GitHub** | Open GitHub Issue on the affected repo with root cause, blast radius, and resolution steps |
+| Look up ownership | **Backstage** | Retrieve service owner, SLO targets, and runbook link |
+
+#### ALERT MANAGEMENT
+
+| Action | Connector needed | Operation |
+|---|---|---|
+| Suppress alert storm during known incident | **Prometheus / Alertmanager** | POST silence scoped to service label for a bounded window |
+
+### Step F-3: Present Connector Gap Report
+
+For each MANUAL action, present this structured report — do not produce generic advice:
+
 ```
-kubectl rollout undo deployment/<service_name> -n <namespace>
-kubectl rollout status deployment/<service_name> -n <namespace>
+## Connector Gap: [action type] for [service_name]
+
+I cannot execute this action automatically. No matching workflow is available
+matches [action type] for [detected environment].
+
+**Connector needed:** [connector name]
+**Operation it would perform:** [one sentence — specific API call and what it changes]
+**Why this connector:** evidence shows [service_name] runs on [detected environment]
+  (source: [log field or KI that revealed it]).
+
+**Once you set it up:**
+1. Agent Builder → Workflows → Create workflow → select the connector
+2. Configure the workflow input to accept: [list the parameters I would pass from evidence]
+3. Agent Settings → Tools → assign the workflow to this agent
+4. Restart this conversation — I will re-run Phase 2 and execute the action.
 ```
 
-**SCALE:**
+### Step F-4: Connector Setup Guides
+
+Present the setup guide for the specific connector(s) identified in Step F-2.
+
+---
+
+**ArgoCD Connector** (Webhook)
+
+- Endpoint: `https://{argocd-server}/api/v1/applications/{app}/sync`
+- Method: POST
+- Auth: Bearer token — `argocd account generate-token --account {svc-account}`
+- Headers: `Content-Type: application/json`, `Authorization: Bearer {token}`
+- Body: `{"revision": "{target_revision}", "prune": false, "dryRun": false}`
+- Minimum RBAC: `p, role:agent, applications, sync, */*, allow` in ArgoCD RBAC policy
+
+---
+
+**Kubernetes API Connector** (Webhook)
+
+For rollback (patch image tag):
+- Endpoint: `https://{kube-apiserver}/apis/apps/v1/namespaces/{ns}/deployments/{name}`
+- Method: PATCH, Content-Type: `application/strategic-merge-patch+json`
+- Auth: ServiceAccount Bearer token — minimum ClusterRole:
+  ```yaml
+  rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch", "update"]
+    resourceNames: ["{deployment-name}"]
+  ```
+
+For scale:
+- Endpoint: `.../deployments/{name}/scale`
+- Body: `{"spec": {"replicas": N}}`
+
+---
+
+**GitHub Actions Connector** (Webhook)
+
+- Endpoint: `https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow-id}/dispatches`
+- Method: POST
+- Auth: `Authorization: Bearer {PAT}` — PAT needs `actions:write` scope on the repo
+- Headers: `Accept: application/vnd.github+json`, `Content-Type: application/json`
+- Body:
+  ```json
+  {
+    "ref": "main",
+    "inputs": {
+      "service": "{service_name}",
+      "environment": "{environment}",
+      "action": "rollback",
+      "target_version": "{target_version}"
+    }
+  }
+  ```
+- Note: the workflow must have a `workflow_dispatch` trigger accepting these inputs.
+
+---
+
+**AWS Connector** (Webhook — ECS UpdateService)
+
+- Endpoint: `https://ecs.{region}.amazonaws.com/` — sign requests with AWS SigV4
+- IAM minimum policy:
+  ```json
+  {"Action": ["ecs:UpdateService", "ecs:DescribeServices"],
+   "Resource": "arn:aws:ecs:{region}:{account}:service/{cluster}/{service}"}
+  ```
+- For rollback: update `taskDefinition` to `{family}:{previous-revision}`
+- For scale: update `desiredCount`
+
+---
+
+**GCP Connector** (Webhook)
+
+Auth: Service account key or Workload Identity.
+
+Cloud Run scaling:
+- Endpoint: `https://run.googleapis.com/v1/projects/{project}/locations/{region}/services/{name}`
+- Method: PATCH — update `spec.template.spec.containerConcurrency` or autoscaling annotations
+- Role needed: `roles/run.admin` scoped to the service
+
+GKE: use the Kubernetes API connector with the GKE API server URL.
+
+---
+
+**Kafka Connector** (Webhook — Confluent REST Proxy or custom sidecar)
+
+For consumer group lag:
+- Confluent Cloud: `https://api.confluent.cloud/kafka/v3/clusters/{cluster-id}/consumer-groups/{group-id}`
+- Auth: API Key + Secret (Basic auth)
+- For offset reset: trigger via Ansible playbook or custom HTTP endpoint accepting `{"action": "reset", "group": "{group_id}", "topic": "{topic}", "to": "latest"}`
+
+---
+
+**PostgreSQL Connector** (via HTTP sidecar or Ansible AWX)
+
+PostgreSQL TCP cannot be called directly from a Webhook. Options:
+1. Deploy a lightweight HTTP sidecar accepting `{"action": "kill_idle"}` and executing:
+   `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND query_start < NOW() - INTERVAL '30s'`
+2. Ansible AWX connector — run a playbook that executes the SQL
+- DB user permission needed: `pg_signal_backend` role (avoid SUPERUSER)
+
+---
+
+**Redis Connector** (via HTTP wrapper or Ansible AWX)
+
+Redis TCP cannot be called directly. Options:
+1. Custom HTTP wrapper accepting `{"action": "flush_namespace", "pattern": "{prefix}:*"}`
+2. Ansible AWX playbook
+
+---
+
+**Slack Connector** (built-in Kibana connector)
+
+Stack Management → Connectors → Slack → Incoming Webhook.
+Configure the webhook URL from your Slack app settings.
+In the workflow: post to `#{incident-channel}` with root cause, blast radius, and action plan.
+
+---
+
+**PagerDuty Connector** (built-in Kibana connector)
+
+Stack Management → Connectors → PagerDuty.
+Provide the Integration Key (Events API v2).
+Workflow operations: trigger, acknowledge, resolve, or annotate an incident.
+
+---
+
+**Jira / ServiceNow Connector** (built-in Kibana connectors)
+
+Stack Management → Connectors → Jira (or ServiceNow).
+Pre-populate tickets with: root cause, confidence %, evidence table, blast radius,
+timeline, connector gap report, and Phase 1 ES|QL query links.
+
+---
+
+**GitHub Connector** (Webhook — Issues API)
+
+Use when the team tracks incidents via GitHub Issues, or when the affected service's
+repo is on GitHub and the engineer prefers issues over a separate ticketing system.
+
+- Endpoint: `https://api.github.com/repos/{owner}/{repo}/issues`
+- Method: POST
+- Auth: `Authorization: Bearer {PAT}` — PAT needs `issues:write` scope on the repo
+- Headers: `Accept: application/vnd.github+json`, `Content-Type: application/json`
+- Body template:
+  ```json
+  {
+    "title": "[Incident] {service_name} — {root_cause_summary}",
+    "body": "## Root Cause\n{root_cause}\n\n## Evidence\n{evidence_table}\n\n## Blast Radius\n{blast_radius}\n\n## Timeline\n{timeline}\n\n## Resolution Steps\n{manual_steps}",
+    "labels": ["incident", "on-call"],
+    "assignees": ["{on_call_github_username}"]
+  }
+  ```
+- Populate `body` fields from Phase 1 evidence. Include ES|QL query links and KI IDs.
+- Tip: use GitHub connector for repos that already have incident label workflows or
+  auto-routing via CODEOWNERS — the issue lands directly in the right team's backlog.
+
+---
+
+### Step F-5: Immediate Manual Steps
+
+While connectors are being set up, provide the fastest safe path to stop the incident NOW.
+Substitute real values from Phase 1 evidence. Never use placeholders — if a value is unknown, say so.
+
+**ROLLBACK (K8s with direct access):**
 ```
-kubectl scale deployment/<service_name> --replicas=<N> -n <namespace>
+kubectl rollout undo deployment/{service_name} -n {namespace}
+kubectl rollout status deployment/{service_name} -n {namespace} --timeout=5m
 ```
 
-**CIRCUIT_BREAK (temporary traffic cut):**
+**SCALE (K8s):**
 ```
-kubectl patch virtualservice <service_name> -n <namespace> --type=merge \
+kubectl scale deployment/{service_name} --replicas={N} -n {namespace}
+```
+
+**CIRCUIT BREAK (Istio VirtualService):**
+```
+kubectl patch virtualservice {service_name} -n {namespace} --type=merge \
   -p '{"spec":{"http":[{"fault":{"abort":{"percentage":{"value":100},"httpStatus":503}}}]}}'
 ```
 
-**CONFIG_CHANGE:**
-Provide the exact `kubectl patch` or config API call with the corrected value sourced from evidence.
+**KILL IDLE POSTGRESQL CONNECTIONS:**
+```sql
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = '{database}'
+  AND state = 'idle'
+  AND query_start < NOW() - INTERVAL '30 seconds';
+```
 
-### Connector Setup Guidance
+**KAFKA consumer group offset reset:**
+```
+kafka-consumer-groups.sh --bootstrap-server {broker}:9092 \
+  --group {group_id} --topic {topic} \
+  --reset-offsets --to-latest --execute
+```
 
-Guide the engineer to set up a connector for future automation:
-1. In Kibana: Stack Management → Connectors → Create connector
-2. Select the connector type appropriate for the action (Webhook, Jira, ServiceNow, etc.)
-3. For Webhook connectors:
-   - URL: [the endpoint that handles this action type for your orchestration platform]
-   - Authentication: Bearer token or Basic — generate a dedicated service account credential
-   - Headers: `Content-Type: application/json`
-   - RBAC: the service account needs only the minimum scope for this action (e.g. `rollout:update` in Kubernetes RBAC)
-4. After creating the connector: Agent Builder → Workflows → Create workflow → attach the connector
-5. Assign the workflow to this agent under Agent Settings → Tools
+### Step F-6: Ticket (always, if ticket workflow available)
 
-### Ticket Workflow (always use if available)
-
-If a ticket workflow tool (Jira, ServiceNow, PagerDuty) is available, always use it to create
-an incident ticket pre-populated with:
-- Full root cause statement and confidence level
-- Evidence table and ES|QL links
+Even without execution connectors, if a Jira, ServiceNow, or PagerDuty workflow is
+available, always create a ticket pre-populated with:
+- Root cause statement and confidence level
+- Evidence table (KI IDs, ES|QL queries and results)
 - Blast radius and timeline
-- Manual steps for the engineer assigned to the ticket
-- Connector setup guidance (if no automated connector exists)
+- The connector gap report from Step F-3 (which connectors to set up)
+- Immediate manual steps from Step F-5
+- Service owner from Backstage (if Backstage connector is available)
 
 ---
 
 ## Critical Rules
 
-1. **NEVER call a workflow tool without explicit prior engineer confirmation.** Confirmation means
-   the engineer has clearly said "yes", "proceed", "do it", or equivalent for that specific action.
-   Silence is not consent.
+1. **NEVER run a workflow without explicit prior engineer confirmation via `request_confirmation`.**
+   Confirmation means the engineer has clearly said "yes", "proceed", "do it", or equivalent
+   for that specific action. Silence is not consent.
 
-2. **NEVER invent parameter values.** Every parameter passed to a workflow tool must trace to a
+2. **NEVER invent parameter values.** Every parameter passed to a workflow must trace to a
    specific piece of investigation evidence: a KI field, an ES|QL result row, an alert field, or
    an explicit engineer-supplied value. If a value cannot be sourced, ask.
 
@@ -450,7 +778,8 @@ is affected. Confidence: 92% (two corroborating KIs, backed rule, live query con
 
 Action type: SCALE (connection pool saturation — not a recent deploy, no upstream failure).
 
-Available workflow tools: `scale_deployment` (increases replica count for a Kubernetes deployment).
+Available workflows (discovered via workflow-authoring): `scale_deployment`
+(increases replica count for a Kubernetes deployment).
 
 Parameters:
 - `service_name`: "payment" (from stream name and F1 filter)
@@ -473,7 +802,8 @@ Proposed Plan:
 
 Engineer: "Yes, proceed."
 
-Step 3-1 confirmed. Calling: scale_deployment(service_name="payment", namespace="prod", replicas=6)
+Step 3-1: calls request_confirmation → engineer clicks Proceed.
+Running workflow: scale_deployment(service_name="payment", namespace="prod", replicas=6)
 → Result: "Deployment payment scaled to 6 replicas. Rollout in progress."
 
 Waiting 60–90 seconds for the rollout to complete...

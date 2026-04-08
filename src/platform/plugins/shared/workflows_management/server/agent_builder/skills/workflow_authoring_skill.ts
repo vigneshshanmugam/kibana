@@ -52,6 +52,9 @@ To list or find existing workflows, use the SML (Semantic Metadata Layer) tools 
 1. **${platformCoreTools.smlSearch}**: Search for workflows by name, description, or tags. Pass a query like "workflow" or use "*" to return all available workflows. Results include \`chunk_id\` values.
 2. **${platformCoreTools.smlAttach}**: Attach a workflow to the conversation by passing \`chunk_ids\` from the search results. This loads the full workflow YAML as a ${WORKFLOW_YAML_ATTACHMENT_TYPE} attachment that you can then edit with the edit tools below.
 
+### Execution Tools
+- **${workflowTools.testWorkflow}**: Execute a workflow in test mode and return the result. Accepts \`workflowYaml\` (unsaved draft) or \`workflowId\` (saved workflow), plus optional \`inputs\`. Polls until completion (up to 120 s) and returns status + per-step outputs. Use this to execute a workflow you just authored without saving it first.
+
 ### Edit Tools
 - **${workflowTools.setYaml}**: Set the complete workflow YAML. Creates a new workflow when no ${WORKFLOW_YAML_ATTACHMENT_TYPE} attachment exists, or replaces the entire YAML of an existing one.
 - **${workflowTools.insertStep}**: Insert a new step at the end of the steps list (requires existing attachment)
