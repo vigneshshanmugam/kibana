@@ -20,6 +20,6 @@ export const registerSkills = ({
 }) => {
   plugins.agentBuilder.skills.register(createRcaSkill());
   plugins.agentBuilder.skills.register(createInvestigationSkill());
-  plugins.agentBuilder.skills.register(createRemediationSkill());
+  // plugins.agentBuilder.skills.register(createRemediationSkill());
   logger.debug('Successfully registered observability skills in agent-builder');
 };

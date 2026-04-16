@@ -54,7 +54,7 @@ export async function registerObservabilityAgent({
         ${getEntityLinkingInstructions({ urlPrefix })}
       `),
         tools: [{ tool_ids: OBSERVABILITY_AGENT_TOOL_IDS }],
-        skill_ids: ['observability.remediation', 'observability.log-search'],
+        skill_ids: ['observability.log-search'],
       };
     },
   });

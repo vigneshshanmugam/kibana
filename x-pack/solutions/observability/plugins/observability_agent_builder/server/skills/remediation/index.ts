@@ -31,12 +31,12 @@ const REMEDIATION_TOOL_IDS = [
   `${toolNamespaces.workflows}.get_connectors`,
 ];
 
-export const createRemediationSkill = () =>
-  defineSkillType({
-    id: 'observability.remediation',
-    name: 'remediation',
-    basePath: 'skills/observability',
-    description: remediationSkillDescription,
-    content: remediationSkillContent,
-    getRegistryTools: () => REMEDIATION_TOOL_IDS,
-  });
+// export const createRemediationSkill = () =>
+//   defineSkillType({
+//     id: 'observability.remediation',
+//     name: 'remediation',
+//     basePath: 'skills/observability',
+//     description: remediationSkillDescription,
+//     content: remediationSkillContent,
+//     getRegistryTools: () => REMEDIATION_TOOL_IDS,
+//   });

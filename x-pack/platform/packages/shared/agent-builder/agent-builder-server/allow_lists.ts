@@ -124,7 +124,6 @@ export const AGENT_BUILDER_BUILTIN_SKILLS = [
   // O11Y
   'observability.rca',
   'observability.investigation',
-  'observability.remediation',
 
   // Search
   `${internalNamespaces.search}.keyword-search`,
