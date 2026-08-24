@@ -1,11 +1,12 @@
 /*
- * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under the Elastic License
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
 
-import { loggingSystemMock } from '@kbn/core/server/mocks';
+import { SavedObjectsErrorHelpers } from '@kbn/core/server';
+import { loggingSystemMock, savedObjectsServiceMock } from '@kbn/core/server/mocks';
+import { encryptedSavedObjectsMock } from '@kbn/encrypted-saved-objects-plugin/server/mocks';
 
 import { EsServiceAccounts } from './es_service_accounts';
 import { ServiceAccountsService } from './service_accounts_service';
@@ -18,23 +19,44 @@ describe('ServiceAccountsService', () => {
   const startParams = (
     config: { serviceAccounts?: { enabled: boolean; requestLifetime?: string } },
     overrides = {}
-  ) => ({
-    config: createConfig(
-      ConfigSchema.validate(config, { serverless: config.serviceAccounts !== undefined }),
-      loggingSystemMock.createLogger(),
-      { isTLSEnabled: false }
-    ),
-    license: licenseMock.create(),
-    uiam: uiamServiceMock.create(),
-    checkPrivilegesWithRequest: jest.fn(),
-    getCurrentUser: jest.fn(),
-    cloudProjectContext: {
-      organizationId: 'organization-id',
-      projectId: 'project-id',
-      projectType: 'security' as const,
-    },
-    ...overrides,
-  });
+  ) => {
+    const license = licenseMock.create();
+    license.isEnabled.mockReturnValue(true);
+
+    const uiam = uiamServiceMock.create();
+    uiam.exchangeServiceAccountToken.mockResolvedValue({ token: 'essu_token' });
+
+    const encryptedClient = encryptedSavedObjectsMock.createClient();
+    encryptedClient.getDecryptedAsInternalUser.mockRejectedValue(
+      SavedObjectsErrorHelpers.createGenericNotFoundError('binding', 'id')
+    );
+    const encryptedSavedObjects = encryptedSavedObjectsMock.createStart();
+    encryptedSavedObjects.getClient.mockReturnValue(encryptedClient);
+
+    return {
+      config: createConfig(
+        ConfigSchema.validate(config, { serverless: config.serviceAccounts !== undefined }),
+        loggingSystemMock.createLogger(),
+        { isTLSEnabled: false }
+      ),
+      license,
+      uiam,
+      checkPrivilegesWithRequest: jest.fn(),
+      cloudProjectContext: {
+        organizationId: 'organization-id',
+        projectId: 'project-id',
+        projectType: 'security' as const,
+      },
+      buildFlavor: 'serverless' as const,
+      savedObjects: savedObjectsServiceMock.createStartContract(),
+      encryptedSavedObjects,
+      canEncrypt: true,
+      getCurrentUser: jest.fn(),
+      getCurrentProfileId: jest.fn().mockResolvedValue(null),
+      getSpaceId: jest.fn().mockReturnValue('default'),
+      ...overrides,
+    };
+  };
 
   let service: ServiceAccountsService;
 
@@ -57,25 +79,59 @@ describe('ServiceAccountsService', () => {
       );
     });
 
+    it('exposes real workload bindings alongside the UIAM backend', async () => {
+      const start = service.start(startParams({ serviceAccounts: { enabled: true } }))!;
+
+      await expect(
+        start.workloads.getBinding('operation', { workloadType: 'rule', workloadId: 'rule-id' })
+      ).resolves.toBeNull();
+    });
+
     it('falls back to the Elasticsearch backend when UIAM is unavailable', () => {
-      expect(
-        service.start(startParams({ serviceAccounts: { enabled: true } }, { uiam: undefined }))
-      ).toBeInstanceOf(EsServiceAccounts);
+      const start = service.start(
+        startParams({ serviceAccounts: { enabled: true } }, { uiam: undefined })
+      );
+      expect(start).toBeInstanceOf(EsServiceAccounts);
     });
 
     it('falls back to Elasticsearch when project context is unavailable', () => {
-      expect(
-        service.start(
-          startParams({ serviceAccounts: { enabled: true } }, { cloudProjectContext: undefined })
-        )
-      ).toBeInstanceOf(EsServiceAccounts);
+      const start = service.start(
+        startParams({ serviceAccounts: { enabled: true } }, { cloudProjectContext: undefined })
+      );
+      expect(start).toBeInstanceOf(EsServiceAccounts);
+    });
+
+    it('selects the Elasticsearch backend off serverless', async () => {
+      const start = service.start(
+        startParams({ serviceAccounts: { enabled: true } }, { buildFlavor: 'traditional' })
+      )!;
+
+      await expect(
+        start.createFakeRequest({ serviceAccountId: 'service-account-id' })
+      ).rejects.toMatchObject({
+        message: 'Creating requests for Elasticsearch service accounts is not yet implemented',
+        output: { statusCode: 501 },
+      });
+    });
+
+    it('refuses workload bindings on the Elasticsearch backend', async () => {
+      const start = service.start(
+        startParams({ serviceAccounts: { enabled: true } }, { buildFlavor: 'traditional' })
+      )!;
+
+      await expect(
+        start.workloads.getBinding('operation', { workloadType: 'rule', workloadId: 'rule-id' })
+      ).rejects.toMatchObject({
+        message:
+          'Service account workload bindings are not yet implemented for the Elasticsearch backend',
+        output: { statusCode: 501 },
+      });
     });
 
     it('passes the configured refresh lifetime to the UIAM backend', async () => {
       jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
       try {
         const params = startParams({ serviceAccounts: { enabled: true, requestLifetime: '1s' } });
-        params.license.isEnabled.mockReturnValue(true);
         const backend = service.start(params);
         if (!backend) throw new Error('Expected UIAM backend');
         const request = await backend.createFakeRequest({ serviceAccountId: 'sa-id' });
