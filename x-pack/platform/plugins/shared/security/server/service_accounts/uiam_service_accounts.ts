@@ -1,6 +1,5 @@
 /*
- * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under the Elastic License
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
@@ -17,7 +16,13 @@ import type { CreateServiceAccountFakeRequestParams } from './fake_requests';
 import { SERVICE_ACCOUNT_TOKEN_RETRY_REUSE_MS, ServiceAccountFakeRequests } from './fake_requests';
 import { SERVICE_ACCOUNT_ROLE_ASSIGNMENTS } from './role_assignments';
 import { ServiceAccountTokenExchangeError } from './token_exchange_error';
-import type { CloudProjectContext, ServiceAccountsBackend } from './types';
+import type {
+  CloudProjectContext,
+  ListedServiceAccount,
+  ListServiceAccountsParams,
+  ListServiceAccountsResult,
+  ServiceAccountsBackend,
+} from './types';
 import type { SecurityLicense } from '../../common';
 import {
   SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH,
@@ -53,6 +58,29 @@ const serviceAccountSchema = z.object({
       }),
     ])
   ),
+});
+
+const serviceAccountCreatorSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('user'),
+    id: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
+    first_name: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH).optional(),
+    last_name: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH).optional(),
+  }),
+  z.object({
+    type: z.literal('api-key'),
+    id: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
+    description: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH).optional(),
+  }),
+]);
+
+const listedServiceAccountSchema = serviceAccountSchema.extend({
+  creator: serviceAccountCreatorSchema,
+});
+
+const listServiceAccountsResponseSchema = z.object({
+  service_accounts: z.array(listedServiceAccountSchema),
+  after: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH).optional(),
 });
 
 const exchangeTokenResponseSchema = z.object({
@@ -112,26 +140,9 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
     request: KibanaRequest,
     params: CreateServiceAccountParams
   ): Promise<ServiceAccount> {
-    if (!this.license.isEnabled()) {
-      throw Boom.forbidden(
-        'Cannot create a service account: security features are disabled in Elasticsearch'
-      );
-    }
-
+    this.assertLicenseEnabled('create a service account');
     const authorization = getUiamAuthorizationHeaderFromRequest(request);
-
-    const { hasAllRequested } = await this.checkPrivilegesWithRequest(request).globally({
-      elasticsearch: { cluster: ['manage_security'], index: {} },
-    });
-
-    if (!hasAllRequested) {
-      this.logger.warn(
-        'Service account creation denied: missing `manage_security` cluster privilege'
-      );
-      throw Boom.forbidden(
-        'Cannot create a service account: missing `manage_security` cluster privilege'
-      );
-    }
+    await this.assertManageSecurityPrivilege(request, 'create a service account', 'creation');
 
     this.logger.debug('Attempting to create a service account');
 
@@ -162,12 +173,80 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
     }
   }
 
-  private async exchangeToken(serviceAccountId: string): Promise<{ token: string }> {
-    if (!this.license.isEnabled()) {
-      throw Boom.forbidden(
-        'Cannot exchange a service account token: security features are disabled in Elasticsearch'
-      );
+  async list(
+    request: KibanaRequest,
+    params: ListServiceAccountsParams = {}
+  ): Promise<ListServiceAccountsResult> {
+    this.assertLicenseEnabled('list service accounts');
+    await this.assertManageSecurityPrivilege(request, 'list service accounts', 'listing');
+
+    this.logger.debug('Attempting to list service accounts');
+
+    try {
+      const result = await this.uiam.listServiceAccounts(params);
+      const parsed = listServiceAccountsResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        this.logger.error(
+          `Service account list payload from UIAM failed validation: ${parsed.error.message}`
+        );
+        throw new Error('Error occurred during service account listing.');
+      }
+
+      return parsed.data;
+    } catch (e) {
+      this.logger.error(`Failed to list service accounts: ${getDetailedErrorMessage(e)}`);
+      throw e;
     }
+  }
+
+  async get(request: KibanaRequest, id: string): Promise<ListedServiceAccount> {
+    this.assertLicenseEnabled('get a service account');
+    await this.assertManageSecurityPrivilege(request, 'get a service account', 'retrieval');
+
+    this.logger.debug(`Attempting to get service account ${id}`);
+
+    try {
+      const result = await this.uiam.getServiceAccount(id);
+      const parsed = listedServiceAccountSchema.safeParse(result);
+      if (!parsed.success) {
+        this.logger.error(
+          `Service account payload from UIAM failed validation: ${parsed.error.message}`
+        );
+        throw new Error('Error occurred during service account retrieval.');
+      }
+
+      return parsed.data;
+    } catch (e) {
+      this.logger.error(`Failed to get service account: ${getDetailedErrorMessage(e)}`);
+      throw e;
+    }
+  }
+
+  private assertLicenseEnabled(action: string): void {
+    if (!this.license.isEnabled()) {
+      throw Boom.forbidden(`Cannot ${action}: security features are disabled in Elasticsearch`);
+    }
+  }
+
+  private async assertManageSecurityPrivilege(
+    request: KibanaRequest,
+    action: string,
+    logAction: string
+  ): Promise<void> {
+    const { hasAllRequested } = await this.checkPrivilegesWithRequest(request).globally({
+      elasticsearch: { cluster: ['manage_security'], index: {} },
+    });
+
+    if (!hasAllRequested) {
+      this.logger.warn(
+        `Service account ${logAction} denied: missing \`manage_security\` cluster privilege`
+      );
+      throw Boom.forbidden(`Cannot ${action}: missing \`manage_security\` cluster privilege`);
+    }
+  }
+
+  private async exchangeToken(serviceAccountId: string): Promise<{ token: string }> {
+    this.assertLicenseEnabled('exchange a service account token');
 
     this.logger.debug(
       `Attempting to exchange service account ${serviceAccountId} for an ephemeral token`
@@ -224,10 +303,6 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
     } catch {
       return null;
     }
-  }
-
-  releaseFakeRequest(request: KibanaRequest): void {
-    this.fakeRequests.release(request);
   }
 }
 
