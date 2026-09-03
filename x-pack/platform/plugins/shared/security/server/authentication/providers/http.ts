@@ -1,6 +1,5 @@
 /*
- * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under the Elastic License
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
@@ -100,11 +99,28 @@ export class HTTPAuthenticationProvider extends BaseAuthenticationProvider {
     if (
       this.options.uiam &&
       authorizationHeader.scheme.toLowerCase() === 'bearer' &&
-      isUiamCredential(authorizationHeader) &&
-      request.route.options.tags.includes(ROUTE_TAG_ACCEPT_UIAM_OAUTH) &&
-      !this.hasVerifiedInternalCallerAttestation(request, authorizationHeader)
+      isUiamCredential(authorizationHeader)
     ) {
-      return this.authenticateViaUiamOAuth(request, authorizationHeader);
+      if (
+        request.route.options.tags.includes(ROUTE_TAG_ACCEPT_UIAM_OAUTH) &&
+        !this.hasVerifiedInternalCallerAttestation(request, authorizationHeader)
+      ) {
+        return this.authenticateViaUiamOAuth(request, authorizationHeader);
+      }
+
+      if (
+        !request.route.options.tags.includes(ROUTE_TAG_ACCEPT_UIAM_OAUTH) &&
+        !this.hasVerifiedInternalCallerAttestation(request, authorizationHeader)
+      ) {
+        this.logger.warn(
+          `Detected UIAM OAuth token on a non-MCP endpoint: ` +
+            `${request.route.method.toUpperCase()} ${request.route.path}. ` +
+            `OAuth tokens are only accepted on routes tagged with "${ROUTE_TAG_ACCEPT_UIAM_OAUTH}". ` +
+            `This may indicate a misconfigured MCP client or token misuse.`
+        );
+      }
+
+      return this.authenticateViaUiamAccessToken(request, authorizationHeader);
     }
 
     try {
@@ -123,7 +139,7 @@ export class HTTPAuthenticationProvider extends BaseAuthenticationProvider {
         // Log a portion of the JWT signature to make debugging easier.
         const jwtExcerpt = authorizationHeader.credentials.slice(-10);
         this.logger.error(
-          `Attempted to authenticate with JWT credentials (…${jwtExcerpt}) against ${request.url.pathname}${request.url.search}, but it's not allowed. ` +
+          `Attempted to authenticate with JWT credentials (...${jwtExcerpt}) against ${request.url.pathname}${request.url.search}, but it's not allowed. ` +
             `Ensure that the route is defined with the "${ROUTE_TAG_ACCEPT_JWT}" tag.`
         );
         return AuthenticationResult.notHandled();
@@ -194,6 +210,28 @@ export class HTTPAuthenticationProvider extends BaseAuthenticationProvider {
     );
   }
 
+  private async authenticateViaUiamAccessToken(
+    request: KibanaRequest,
+    authorizationHeader: HTTPAuthorizationHeader
+  ): Promise<AuthenticationResult> {
+    try {
+      const authHeaders = this.options.uiam!.getAuthenticationHeaders(authorizationHeader.credentials);
+      const user = await this.getUser(request, authHeaders);
+
+      this.logger.debug('Request authenticated via UIAM access token.');
+
+      return AuthenticationResult.succeeded(
+        { ...user, http_authentication_scheme: authorizationHeader.scheme.toLowerCase() },
+        { authHeaders }
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to authenticate via UIAM access token: ${getDetailedErrorMessage(err)}`
+      );
+      return AuthenticationResult.failed(err);
+    }
+  }
+
   /**
    * Exchanges a UIAM OAuth access token for an ephemeral token via the UIAM service, verifies
    * the audience, and resolves the user via Elasticsearch using the ephemeral token.
@@ -204,21 +242,13 @@ export class HTTPAuthenticationProvider extends BaseAuthenticationProvider {
   ): Promise<AuthenticationResult> {
     try {
       const clientSans = request.headers['x-client-sans'];
-      console.log('clientSans', clientSans);
       const ephemeralToken = await this.options.uiam!.exchangeOAuthToken(
         authorizationHeader.credentials,
         Array.isArray(clientSans) ? clientSans.join(',') : clientSans
       );
 
-      console.log('ephemeralToken', ephemeralToken);
-
       const authHeaders = this.options.uiam!.getAuthenticationHeaders(ephemeralToken);
-
-      console.log('authHeaders', authHeaders);
-
       const user = await this.getUser(request, authHeaders);
-
-      console.log('user', user);
 
       this.logger.debug('Request authenticated via UIAM OAuth token exchange.');
 
