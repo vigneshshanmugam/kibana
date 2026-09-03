@@ -231,15 +231,15 @@ describe('UiamServiceAccounts', () => {
 
       expect(mockUiam.createServiceAccount).toHaveBeenCalledWith(
         new HTTPAuthorizationHeader('Bearer', 'essu_my_token'),
-        expect.objectContaining({ assumable_by: customAssumableBy }),
-        { includeClientAuthentication: true }
-      );
-      // `buildAssumableBy` produces the current-project entry; the caller's list must be used instead.
-      expect(mockUiam.createServiceAccount).not.toHaveBeenCalledWith(
-        new HTTPAuthorizationHeader('Bearer', 'essu_my_token'),
         expect.objectContaining({
           assumable_by: [
-            expect.objectContaining({ project_id: 'project-id', project_type: 'security' }),
+            ...customAssumableBy,
+            {
+              type: 'project-service-account',
+              organization_id: 'organization-id',
+              project_type: 'security',
+              project_id: 'project-id',
+            },
           ],
         }),
         { includeClientAuthentication: true }

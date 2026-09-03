@@ -9048,7 +9048,7 @@
   version "0.0.0"
   uid ""
 
-"@kbn/service-accounts-example-plugin@link:examples/service_accounts_example":
+"@kbn/service-accounts-example-plugin@workspace:*":
   version "0.0.0"
   uid ""
 

@@ -148,6 +148,7 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
     await this.assertManageSecurityPrivilege(request, 'create a service account', 'creation');
 
     this.logger.debug('Attempting to create a service account');
+    const defaultAssumableBy = buildAssumableBy(this.cloudProjectContext);
 
     try {
       const result = await this.uiam.createServiceAccount(
@@ -156,7 +157,9 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
           organization_id: this.cloudProjectContext.organizationId,
           name: params.name,
           role_assignments: SERVICE_ACCOUNT_ROLE_ASSIGNMENTS,
-          assumable_by: params.assumable_by ?? buildAssumableBy(this.cloudProjectContext),
+          assumable_by: params.assumable_by
+            ? [...params.assumable_by, ...defaultAssumableBy]
+            : defaultAssumableBy,
         },
         { includeClientAuthentication: !isExternalApiKey(this.getCurrentUser(request)) }
       );
