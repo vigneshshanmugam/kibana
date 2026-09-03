@@ -61,8 +61,14 @@ export class RelayClient implements RelayClientContract {
     this.logger = logger;
   }
 
-  async startInstall(body: RelayInstallRequest): Promise<RelayInstallResponse> {
-    const response = await this.post('/v1/slack/install', body);
+  async startInstall(
+    body: RelayInstallRequest,
+    bearerToken?: string
+  ): Promise<RelayInstallResponse> {
+    const extraHeaders: Record<string, string> | undefined = bearerToken
+      ? { Authorization: `Bearer ${bearerToken}` }
+      : undefined;
+    const response = await this.post('/v1/slack/install', body, extraHeaders);
     return response.data as RelayInstallResponse;
   }
 
@@ -194,8 +200,12 @@ export class RelayClient implements RelayClientContract {
     return { status: response.status };
   }
 
-  private async post(path: string, body: unknown): Promise<AxiosResponse> {
-    return this.send(path, 'post', body);
+  private async post(
+    path: string,
+    body: unknown,
+    extraHeaders?: Record<string, string>
+  ): Promise<AxiosResponse> {
+    return this.send(path, 'post', body, extraHeaders);
   }
 
   private async put(path: string, body: unknown): Promise<AxiosResponse> {
@@ -213,9 +223,16 @@ export class RelayClient implements RelayClientContract {
   private async send(
     path: string,
     method: 'get' | 'post' | 'put' | 'delete',
-    data?: unknown
+    data?: unknown,
+    extraHeaders?: Record<string, string>
   ): Promise<AxiosResponse> {
-    const response = await this.sendRequest(new URL(path, this.baseUrl).toString(), data, method);
+    const response = await this.sendRequest(
+      new URL(path, this.baseUrl).toString(),
+      data,
+      method,
+      undefined,
+      extraHeaders
+    );
     if (response.status >= 200 && response.status < 300) {
       return response;
     }
@@ -228,14 +245,15 @@ export class RelayClient implements RelayClientContract {
     url: string,
     data: unknown,
     method: 'get' | 'post' | 'put' | 'delete' = 'post',
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    extraHeaders?: Record<string, string>
   ): Promise<AxiosResponse> {
     return request({
       axios: this.axios,
       url,
       method,
       data,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
       configurationUtilities: this.configurationUtilities,
       sslOverrides: this.configurationUtilities.getRelaySSLSettings(),
       logger: this.logger,

@@ -44,20 +44,23 @@ const serviceAccountSchema = z.object({
   name: serviceAccountNameSchema,
   organization_id: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
   role_assignments: z.record(z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH), z.unknown()),
-  assumable_by: z.array(
-    z.discriminatedUnion('type', [
-      z.object({
-        type: z.literal('project-service-account'),
-        organization_id: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
-        project_type: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
-        project_id: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
-      }),
-      z.object({
-        type: z.literal('platform-service-account'),
-        service_account_id: serviceAccountIdSchema,
-      }),
-    ])
-  ),
+  assumable_by: z
+    .array(
+      z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('project-service-account'),
+          organization_id: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
+          project_type: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
+          project_id: z.string().max(SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH),
+        }),
+        z.object({
+          type: z.literal('platform-service-account'),
+          service_account_id: serviceAccountIdSchema,
+        }),
+      ])
+    )
+    // POC override support can pass both project and platform assumers; cap the response shape.
+    .max(10),
 });
 
 const serviceAccountCreatorSchema = z.discriminatedUnion('type', [
@@ -153,7 +156,7 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
           organization_id: this.cloudProjectContext.organizationId,
           name: params.name,
           role_assignments: SERVICE_ACCOUNT_ROLE_ASSIGNMENTS,
-          assumable_by: buildAssumableBy(this.cloudProjectContext),
+          assumable_by: params.assumable_by ?? buildAssumableBy(this.cloudProjectContext),
         },
         { includeClientAuthentication: !isExternalApiKey(this.getCurrentUser(request)) }
       );
@@ -171,6 +174,40 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
       this.logger.error(`Failed to create service account: ${getDetailedErrorMessage(e)}`);
       throw e;
     }
+  }
+
+  async exchangeToken(serviceAccountId: string): Promise<{ token: string }> {
+    this.assertLicenseEnabled('exchange a service account token');
+
+    this.logger.debug(
+      `Attempting to exchange service account ${serviceAccountId} for an ephemeral token`
+    );
+
+    let result: { token: string };
+    try {
+      result = await this.uiam.exchangeServiceAccountToken(serviceAccountId);
+    } catch (e) {
+      const cause =
+        e instanceof Error ? e : new Error('Unknown token exchange failure.', { cause: e });
+      const retryDelay = getExchangeRetryDelay(cause);
+      // Upstream messages can contain credentials; retain the cause without logging its contents.
+      this.logger.error(
+        `Failed to exchange service account ${serviceAccountId} for an ephemeral token (${
+          retryDelay === null ? 'terminal' : 'retryable'
+        } failure)`
+      );
+      throw new ServiceAccountTokenExchangeError(cause, retryDelay !== null, retryDelay ?? 0);
+    }
+
+    const parsed = exchangeTokenResponseSchema.safeParse(result);
+    if (!parsed.success) {
+      this.logger.error(
+        `Token exchange payload from UIAM failed validation for service account ${serviceAccountId}`
+      );
+      throw new ServiceAccountTokenExchangeError(parsed.error, false);
+    }
+
+    return parsed.data;
   }
 
   async list(
@@ -222,6 +259,32 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
     }
   }
 
+  async createFakeRequest(params: CreateServiceAccountFakeRequestParams): Promise<KibanaRequest> {
+    return await this.fakeRequests.create(params);
+  }
+
+  async reauthenticateFakeRequest(
+    request: KibanaRequest
+  ): Promise<{ authorization: string } | null> {
+    if (!this.fakeRequests.isServiceAccountRequest(request)) {
+      return null;
+    }
+
+    try {
+      const token = await this.fakeRequests.ensureFreshToken(
+        request,
+        SERVICE_ACCOUNT_TOKEN_RETRY_REUSE_MS
+      );
+      return { authorization: `Bearer ${token}` };
+    } catch {
+      return null;
+    }
+  }
+
+  releaseFakeRequest(request: KibanaRequest): void {
+    this.fakeRequests.release(request);
+  }
+
   private assertLicenseEnabled(action: string): void {
     if (!this.license.isEnabled()) {
       throw Boom.forbidden(`Cannot ${action}: security features are disabled in Elasticsearch`);
@@ -242,66 +305,6 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
         `Service account ${logAction} denied: missing \`manage_security\` cluster privilege`
       );
       throw Boom.forbidden(`Cannot ${action}: missing \`manage_security\` cluster privilege`);
-    }
-  }
-
-  private async exchangeToken(serviceAccountId: string): Promise<{ token: string }> {
-    this.assertLicenseEnabled('exchange a service account token');
-
-    this.logger.debug(
-      `Attempting to exchange service account ${serviceAccountId} for an ephemeral token`
-    );
-
-    let result: { token: string };
-    try {
-      result = await this.uiam.exchangeServiceAccountToken(serviceAccountId);
-    } catch (e) {
-      const cause =
-        e instanceof Error ? e : new Error('Unknown token exchange failure.', { cause: e });
-      const retryDelay = getExchangeRetryDelay(cause);
-      // Upstream messages can contain credentials; retain the cause without logging its contents.
-      this.logger.error(
-        `Failed to exchange service account ${serviceAccountId} for an ephemeral token (${
-          retryDelay === null ? 'terminal' : 'retryable'
-        } failure)`
-      );
-      throw new ServiceAccountTokenExchangeError(cause, retryDelay !== null, retryDelay ?? 0);
-    }
-
-    const parsed = exchangeTokenResponseSchema.safeParse(result);
-    if (!parsed.success) {
-      this.logger.error(
-        `Token exchange payload from UIAM failed validation for service account ${serviceAccountId}`
-      );
-      throw new ServiceAccountTokenExchangeError(parsed.error, false);
-    }
-
-    return parsed.data;
-  }
-
-  async createFakeRequest(params: CreateServiceAccountFakeRequestParams): Promise<KibanaRequest> {
-    return await this.fakeRequests.create(params);
-  }
-
-  releaseFakeRequest(request: KibanaRequest): void {
-    this.fakeRequests.release(request);
-  }
-
-  async reauthenticateFakeRequest(
-    request: KibanaRequest
-  ): Promise<{ authorization: string } | null> {
-    if (!this.fakeRequests.isServiceAccountRequest(request)) {
-      return null;
-    }
-
-    try {
-      const token = await this.fakeRequests.ensureFreshToken(
-        request,
-        SERVICE_ACCOUNT_TOKEN_RETRY_REUSE_MS
-      );
-      return { authorization: `Bearer ${token}` };
-    } catch {
-      return null;
     }
   }
 }
