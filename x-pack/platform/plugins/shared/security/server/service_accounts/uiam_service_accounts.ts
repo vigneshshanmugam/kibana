@@ -182,12 +182,7 @@ export class UiamServiceAccounts implements ServiceAccountsBackend {
       const retryDelay = getExchangeRetryDelay(cause);
       // Upstream messages can contain credentials; retain the cause without logging its contents.
       this.logger.error(
-<<<<<<< HEAD
-        `Failed to exchange token for service account ${serviceAccountId} (${
-          retryDelay === null ? 'not retryable' : 'retryable'
-=======
->>>>>>> 7e8a9be0352 (Update x-pack/platform/plugins/shared/security/server/service_accounts/uiam_service_accounts.ts)
-        } failure)`
+        `Failed to exchange service account ${serviceAccountId} for an ephemeral token (${retryDelay === null ? 'terminal' : 'retryable'} failure)`
       );
       throw new ServiceAccountTokenExchangeError(cause, retryDelay !== null, retryDelay ?? 0);
     }
