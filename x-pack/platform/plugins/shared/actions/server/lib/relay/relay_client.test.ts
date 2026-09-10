@@ -99,6 +99,32 @@ describe('RelayClient', () => {
     );
   });
 
+  it('adds a bearer token to every authenticated management request', async () => {
+    requestMock.mockResolvedValue({
+      status: 200,
+      data: { bindings: [], tenant_key: 'tenant-1' },
+    } as never);
+    const client = createClient();
+
+    await client.fetchClaim('claim-1', 'essu_token');
+    await client.unbind('tenant-1', 'essu_token');
+    await client.listBindings('tenant-1', {}, 'essu_token');
+    await client.bind('tenant-1', 'C123', 'essu_token');
+    await client.unbindChannel('tenant-1', 'C123', 'essu_token');
+
+    expect(requestMock).toHaveBeenCalledTimes(5);
+    for (const [options] of requestMock.mock.calls) {
+      expect(options).toEqual(
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer essu_token',
+          },
+        })
+      );
+    }
+  });
+
   describe('listBindings', () => {
     it('GETs a single page and maps SUB entries with their display snapshot, exposing next_cursor', async () => {
       requestMock.mockResolvedValue({

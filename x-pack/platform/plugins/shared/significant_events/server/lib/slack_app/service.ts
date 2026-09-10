@@ -105,6 +105,18 @@ export class SlackAppService {
     });
   }
 
+  /** Mints a fresh Relay control-plane credential for UIAM connections. */
+  private async exchangeRelayToken(
+    serviceAccountId: string | null | undefined
+  ): Promise<string | undefined> {
+    if (!serviceAccountId) {
+      return undefined;
+    }
+    const { token } =
+      await this.server.core.security.serviceAccounts.exchangeToken(serviceAccountId);
+    return token;
+  }
+
   /**
    * Unregisters first because `registerDynamicConnector` is a no-op when the id is taken, so a
    * reconnect to a different workspace would otherwise keep serving the previous tenant key.
@@ -452,7 +464,10 @@ export class SlackAppService {
         );
       }
       try {
-        const claim = await relayClient.fetchClaim(connection.claimId);
+        const claim = await relayClient.fetchClaim(
+          connection.claimId,
+          await this.exchangeRelayToken(connection.serviceAccountId)
+        );
         if (claim.status === 'complete') {
           // A completed claim must carry a tenant key: it's what every connected
           // operation (listBindings / bind / unbind / disconnect) keys off. Marking
@@ -516,10 +531,14 @@ export class SlackAppService {
 
     let page;
     try {
-      page = await relayClient.listBindings(connection.tenantKey, {
-        cursor: options.cursor,
-        limit: options.perPage,
-      });
+      page = await relayClient.listBindings(
+        connection.tenantKey,
+        {
+          cursor: options.cursor,
+          limit: options.perPage,
+        },
+        await this.exchangeRelayToken(connection.serviceAccountId)
+      );
     } catch (error) {
       this.logger.warn(`Failed to list bindings from Relay: ${this.toErrorMessage(error)}`);
       throw error;
@@ -547,7 +566,7 @@ export class SlackAppService {
 
   private async requireConnectedTenant(
     request: KibanaRequest
-  ): Promise<{ relayClient: RelayClientContract; tenantKey: string }> {
+  ): Promise<{ relayClient: RelayClientContract; tenantKey: string; bearerToken?: string }> {
     const soClient = this.getSoClient(request);
     const [relayClient, connection] = await Promise.all([
       this.getRelayClient(),
@@ -561,17 +580,21 @@ export class SlackAppService {
     if (connection?.status !== RELAY_APP_CONNECTION_STATUS.connected || !connection.tenantKey) {
       throw new SlackAppUnavailableError('Connection is not in a connected state');
     }
-    return { relayClient, tenantKey: connection.tenantKey };
+    return {
+      relayClient,
+      tenantKey: connection.tenantKey,
+      bearerToken: await this.exchangeRelayToken(connection.serviceAccountId),
+    };
   }
 
   async bindChannel(request: KibanaRequest, channelId: string): Promise<void> {
-    const { relayClient, tenantKey } = await this.requireConnectedTenant(request);
-    await relayClient.bind(tenantKey, channelId);
+    const { relayClient, tenantKey, bearerToken } = await this.requireConnectedTenant(request);
+    await relayClient.bind(tenantKey, channelId, bearerToken);
   }
 
   async unbindChannel(request: KibanaRequest, channelId: string): Promise<void> {
-    const { relayClient, tenantKey } = await this.requireConnectedTenant(request);
-    await relayClient.unbindChannel(tenantKey, channelId);
+    const { relayClient, tenantKey, bearerToken } = await this.requireConnectedTenant(request);
+    await relayClient.unbindChannel(tenantKey, channelId, bearerToken);
   }
 
   async disconnect(request: KibanaRequest): Promise<SlackAppDisconnectResponse> {
@@ -597,7 +620,10 @@ export class SlackAppService {
     // install (no tenantKey) has no Relay-side binding to tear down yet.
     if (relayClient && connection.tenantKey) {
       try {
-        await relayClient.unbind(connection.tenantKey);
+        await relayClient.unbind(
+          connection.tenantKey,
+          await this.exchangeRelayToken(connection.serviceAccountId)
+        );
       } catch (error) {
         // The Relay's own contract requires the caller never see success while a
         // binding survives (a partial teardown returns 502 and must be retried).

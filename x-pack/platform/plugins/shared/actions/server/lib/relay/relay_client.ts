@@ -49,6 +49,9 @@ interface RelayTriggerResponseBody {
   tenant_key?: string;
 }
 
+const bearerHeaders = (bearerToken?: string): Record<string, string> | undefined =>
+  bearerToken ? { Authorization: `Bearer ${bearerToken}` } : undefined;
+
 export class RelayClient implements RelayClientContract {
   private readonly axios = axios.create();
   private readonly baseUrl: URL;
@@ -65,15 +68,16 @@ export class RelayClient implements RelayClientContract {
     body: RelayInstallRequest,
     bearerToken?: string
   ): Promise<RelayInstallResponse> {
-    const extraHeaders: Record<string, string> | undefined = bearerToken
-      ? { Authorization: `Bearer ${bearerToken}` }
-      : undefined;
-    const response = await this.post('/v1/slack/install', body, extraHeaders);
+    const response = await this.post('/v1/slack/install', body, bearerHeaders(bearerToken));
     return response.data as RelayInstallResponse;
   }
 
-  async fetchClaim(claimId: string): Promise<RelayClaimResponse> {
-    const response = await this.post('/v1/slack/install/claim', { claim_id: claimId });
+  async fetchClaim(claimId: string, bearerToken?: string): Promise<RelayClaimResponse> {
+    const response = await this.post(
+      '/v1/slack/install/claim',
+      { claim_id: claimId },
+      bearerHeaders(bearerToken)
+    );
 
     if (response.status === 202) {
       return { status: 'pending' };
@@ -84,8 +88,12 @@ export class RelayClient implements RelayClientContract {
   }
 
   /** Unbind a single workspace binding identified by its tenant key. */
-  async unbind(tenantKey: string): Promise<void> {
-    await this.post('/v1/slack/uninstall', { tenant_key: tenantKey });
+  async unbind(tenantKey: string, bearerToken?: string): Promise<void> {
+    await this.post(
+      '/v1/slack/uninstall',
+      { tenant_key: tenantKey },
+      bearerHeaders(bearerToken)
+    );
   }
 
   /**
@@ -97,7 +105,8 @@ export class RelayClient implements RelayClientContract {
    */
   async listBindings(
     tenantKey: string,
-    options: RelayListBindingsOptions = {}
+    options: RelayListBindingsOptions = {},
+    bearerToken?: string
   ): Promise<RelayBindingsPage> {
     const query = new URLSearchParams({
       limit: String(options.limit ?? RELAY_MAX_PAGE_LIMIT),
@@ -107,7 +116,8 @@ export class RelayClient implements RelayClientContract {
     }
 
     const response = await this.get(
-      `/v1/slack/tenants/${encodeURIComponent(tenantKey)}/bindings?${query.toString()}`
+      `/v1/slack/tenants/${encodeURIComponent(tenantKey)}/bindings?${query.toString()}`,
+      bearerHeaders(bearerToken)
     );
     const body = response.data as RelayBindingsListResponse | undefined;
 
@@ -136,21 +146,27 @@ export class RelayClient implements RelayClientContract {
   }
 
   /** Claim an unclaimed channel (put-if-absent). The caller must hold a registration for the tenant. */
-  async bind(tenantKey: string, channelId: string): Promise<void> {
+  async bind(tenantKey: string, channelId: string, bearerToken?: string): Promise<void> {
     await this.put(
       `/v1/slack/tenants/${encodeURIComponent(tenantKey)}/bindings/${encodeURIComponent(
         channelId
       )}/bind`,
-      {}
+      {},
+      bearerHeaders(bearerToken)
     );
   }
 
   /** Release a channel binding owned by this deployment. */
-  async unbindChannel(tenantKey: string, channelId: string): Promise<void> {
+  async unbindChannel(
+    tenantKey: string,
+    channelId: string,
+    bearerToken?: string
+  ): Promise<void> {
     await this.del(
       `/v1/slack/tenants/${encodeURIComponent(tenantKey)}/bindings/${encodeURIComponent(
         channelId
-      )}/unbind`
+      )}/unbind`,
+      bearerHeaders(bearerToken)
     );
   }
 
@@ -208,16 +224,26 @@ export class RelayClient implements RelayClientContract {
     return this.send(path, 'post', body, extraHeaders);
   }
 
-  private async put(path: string, body: unknown): Promise<AxiosResponse> {
-    return this.send(path, 'put', body);
+  private async put(
+    path: string,
+    body: unknown,
+    extraHeaders?: Record<string, string>
+  ): Promise<AxiosResponse> {
+    return this.send(path, 'put', body, extraHeaders);
   }
 
-  private async del(path: string): Promise<AxiosResponse> {
-    return this.send(path, 'delete');
+  private async del(
+    path: string,
+    extraHeaders?: Record<string, string>
+  ): Promise<AxiosResponse> {
+    return this.send(path, 'delete', undefined, extraHeaders);
   }
 
-  private async get(path: string): Promise<AxiosResponse> {
-    return this.send(path, 'get');
+  private async get(
+    path: string,
+    extraHeaders?: Record<string, string>
+  ): Promise<AxiosResponse> {
+    return this.send(path, 'get', undefined, extraHeaders);
   }
 
   private async send(

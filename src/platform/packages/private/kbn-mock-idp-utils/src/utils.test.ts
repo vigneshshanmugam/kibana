@@ -251,13 +251,19 @@ describe('mock-idp-utils', () => {
         expect(payload.given_name).toBe('Test');
         expect(payload.family_name).toBe('User');
         expect(payload.ras).toBeDefined();
+        expect(payload.ras.organization).toEqual([
+          {
+            role_id: 'organization-admin',
+            organization_id: serverlessOptions.serverless.organizationId,
+          },
+        ]);
         // One grant per canonical project type — origin project type first — so the session can
         // reach cross-project (CPS) linked projects of any type.
         expect(
           payload.ras.project.map((grant: { project_type: string }) => grant.project_type)
         ).toEqual(['observability', 'elasticsearch', 'security', 'workplaceai', 'vectordb']);
         for (const grant of payload.ras.project) {
-          expect(grant.role_id).toBe('cloud-role-id');
+          expect(grant.role_id).toBe(`${grant.project_type}-admin`);
           expect(grant.organization_id).toBe(serverlessOptions.serverless.organizationId);
           expect(grant.application_roles).toEqual(serverlessOptions.roles);
           expect(grant.project_scope).toEqual({ scope: 'all' });

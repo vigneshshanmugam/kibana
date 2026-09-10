@@ -360,7 +360,7 @@ export async function createUiamSessionTokens({
   const userSeedResult = await seedTestUser({
     userId: username,
     organizationId,
-    roleId: 'cloud-role-id',
+    roleId: `${projectType}-admin`,
     projectType,
     applicationRoles: roles,
     email,
@@ -391,13 +391,18 @@ export async function createUiamSessionTokens({
 
       ras: {
         platform: [],
-        organization: [],
+        organization: [
+          {
+            role_id: 'organization-admin',
+            organization_id: organizationId,
+          },
+        ],
         user: [],
         // One grant per project type so the session can reach cross-project (CPS) linked
         // projects of any type, not just the type of the Kibana instance being logged in to.
         project: [...new Set([projectType, ...MOCK_IDP_UIAM_PROJECT_TYPES])].map(
           (grantedProjectType) => ({
-            role_id: 'cloud-role-id',
+            role_id: `${grantedProjectType}-admin`,
             organization_id: organizationId,
             project_type: grantedProjectType,
             application_roles: roles,
@@ -479,7 +484,7 @@ export async function createUiamOAuthAccessToken({
   const userSeedResult = await seedTestUser({
     userId: username,
     organizationId,
-    roleId: 'cloud-role-id',
+    roleId: `${projectType}-admin`,
     projectType,
     applicationRoles: roles,
     email,
@@ -516,7 +521,7 @@ export async function createUiamOAuthAccessToken({
         // projects of any type, not just the type of the Kibana instance being logged in to.
         project: [...new Set([projectType, ...MOCK_IDP_UIAM_PROJECT_TYPES])].map(
           (grantedProjectType) => ({
-            role_id: 'cloud-role-id',
+            role_id: `${grantedProjectType}-admin`,
             organization_id: organizationId,
             project_type: grantedProjectType,
             application_roles: roles,

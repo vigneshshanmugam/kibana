@@ -226,6 +226,7 @@ packages:
   - 'examples/saved_objects'
   - 'examples/screenshot_mode_example'
   - 'examples/search_examples'
+  - 'examples/service_accounts_example'
   - 'examples/share_examples'
   - 'examples/sidebar_examples'
   - 'examples/sse_example'

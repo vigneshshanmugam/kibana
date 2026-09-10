@@ -85,20 +85,24 @@ export interface RelayTriggerResponse {
 
 export interface RelayClientContract {
   startInstall(body: RelayInstallRequest, bearerToken?: string): Promise<RelayInstallResponse>;
-  fetchClaim(claimId: string): Promise<RelayClaimResponse>;
+  fetchClaim(claimId: string, bearerToken?: string): Promise<RelayClaimResponse>;
   /** Unbind a single workspace binding identified by its tenant key. */
-  unbind(tenantKey: string): Promise<void>;
+  unbind(tenantKey: string, bearerToken?: string): Promise<void>;
   /**
    * Fetch a single page of the calling deployment's own SUB (channel-scoped) bindings for a
    * given Slack workspace (tenant) — the "connected channels" inventory. Each entry carries
    * its persisted display snapshot (`display_name`, `visibility`). Follow `nextCursor` to
    * read subsequent pages of the cursor-paginated endpoint.
    */
-  listBindings(tenantKey: string, options?: RelayListBindingsOptions): Promise<RelayBindingsPage>;
+  listBindings(
+    tenantKey: string,
+    options?: RelayListBindingsOptions,
+    bearerToken?: string
+  ): Promise<RelayBindingsPage>;
   /** Claim an unclaimed channel for this deployment (put-if-absent; 409 if already claimed). */
-  bind(tenantKey: string, channelId: string): Promise<void>;
+  bind(tenantKey: string, channelId: string, bearerToken?: string): Promise<void>;
   /** Release a channel binding owned by this deployment (404 if none; 403 if owned by another). */
-  unbindChannel(tenantKey: string, channelId: string): Promise<void>;
+  unbindChannel(tenantKey: string, channelId: string, bearerToken?: string): Promise<void>;
   /** Post a message to a channel bound here (403 if not bound; 409 if the app was uninstalled). */
   trigger(input: RelayTriggerInput): Promise<RelayTriggerResponse>;
   isRelayOrigin(url: string): boolean;

@@ -458,12 +458,31 @@ describe('SlackAppService', () => {
 
       const result = await new SlackAppService(server).getStatus(request);
 
-      expect(fetchClaim).toHaveBeenCalledWith('claim-1');
+      expect(fetchClaim).toHaveBeenCalledWith('claim-1', undefined);
       expect(soClient.create).not.toHaveBeenCalled();
       expect(result).toEqual({
         available: true,
         status: RELAY_APP_CONNECTION_STATUS.oauthInProgress,
       });
+    });
+
+    it('exchanges a fresh UIAM token when polling the install claim', async () => {
+      const { server, soClient, exchangeToken } = createHarness({
+        serviceAccountsEnabled: true,
+      });
+      soClient.get.mockResolvedValue({
+        attributes: {
+          status: RELAY_APP_CONNECTION_STATUS.oauthInProgress,
+          serviceAccountId: 'sa-1',
+          claimId: 'claim-1',
+        },
+      });
+      fetchClaim.mockResolvedValue({ status: 'pending' });
+
+      await new SlackAppService(server).getStatus(request);
+
+      expect(exchangeToken).toHaveBeenCalledWith('sa-1');
+      expect(fetchClaim).toHaveBeenCalledWith('claim-1', 'essu_service_account_token');
     });
 
     it('fails terminally when an in-progress install has no claim id', async () => {
@@ -619,12 +638,32 @@ describe('SlackAppService', () => {
       const result = await new SlackAppService(server).disconnect(request);
 
       expect(invalidateAsInternalUser).toHaveBeenCalledWith({ ids: ['key-1'] });
-      expect(unbind).toHaveBeenCalledWith('tenant-A');
+      expect(unbind).toHaveBeenCalledWith('tenant-A', undefined);
       expect(soClient.delete).toHaveBeenCalledWith(
         RELAY_APP_CONNECTION_SO_TYPE,
         RELAY_APP_CONNECTION_SO_ID
       );
       expect(result).toEqual({ status: 'disconnected' });
+    });
+
+    it('exchanges a fresh UIAM token before uninstalling from the Relay', async () => {
+      const { server, soClient, exchangeToken } = createHarness({
+        serviceAccountsEnabled: true,
+      });
+      soClient.get.mockResolvedValue({
+        attributes: {
+          status: RELAY_APP_CONNECTION_STATUS.connected,
+          serviceAccountId: 'sa-1',
+          tenantKey: 'tenant-A',
+          surface: 'slack',
+        },
+      });
+      unbind.mockResolvedValue(undefined);
+
+      await new SlackAppService(server).disconnect(request);
+
+      expect(exchangeToken).toHaveBeenCalledWith('sa-1');
+      expect(unbind).toHaveBeenCalledWith('tenant-A', 'essu_service_account_token');
     });
 
     it('skips the Relay unbind when the binding is still in-progress (no tenantKey)', async () => {
@@ -794,7 +833,34 @@ describe('SlackAppService', () => {
 
       await new SlackAppService(server).listBindings(request, { cursor: 'cursor-1', perPage: 10 });
 
-      expect(listBindings).toHaveBeenCalledWith('tenant-A', { cursor: 'cursor-1', limit: 10 });
+      expect(listBindings).toHaveBeenCalledWith(
+        'tenant-A',
+        { cursor: 'cursor-1', limit: 10 },
+        undefined
+      );
+    });
+
+    it('exchanges a fresh UIAM token before listing bindings', async () => {
+      const { server, soClient, exchangeToken } = createHarnessWithListBindings({
+        serviceAccountsEnabled: true,
+      });
+      soClient.get.mockResolvedValue({
+        attributes: {
+          status: RELAY_APP_CONNECTION_STATUS.connected,
+          serviceAccountId: 'sa-1',
+          tenantKey: 'tenant-A',
+        },
+      });
+      listBindings.mockResolvedValue({ bindings: [] });
+
+      await new SlackAppService(server).listBindings(request);
+
+      expect(exchangeToken).toHaveBeenCalledWith('sa-1');
+      expect(listBindings).toHaveBeenCalledWith(
+        'tenant-A',
+        { cursor: undefined, limit: undefined },
+        'essu_service_account_token'
+      );
     });
 
     it('ignores entries without a scope_id', async () => {
@@ -875,7 +941,26 @@ describe('SlackAppService', () => {
 
       await new SlackAppService(server).bindChannel(request, 'C123');
 
-      expect(bind).toHaveBeenCalledWith('tenant-A', 'C123');
+      expect(bind).toHaveBeenCalledWith('tenant-A', 'C123', undefined);
+    });
+
+    it('exchanges a fresh UIAM token before binding a channel', async () => {
+      const { server, soClient, exchangeToken } = createHarnessWithChannelOps({
+        serviceAccountsEnabled: true,
+      });
+      soClient.get.mockResolvedValue({
+        attributes: {
+          status: RELAY_APP_CONNECTION_STATUS.connected,
+          serviceAccountId: 'sa-1',
+          tenantKey: 'tenant-A',
+        },
+      });
+      bind.mockResolvedValue(undefined);
+
+      await new SlackAppService(server).bindChannel(request, 'C123');
+
+      expect(exchangeToken).toHaveBeenCalledWith('sa-1');
+      expect(bind).toHaveBeenCalledWith('tenant-A', 'C123', 'essu_service_account_token');
     });
 
     it('bindChannel throws when the relay client is not available', async () => {
@@ -908,7 +993,30 @@ describe('SlackAppService', () => {
 
       await new SlackAppService(server).unbindChannel(request, 'C123');
 
-      expect(unbindChannel).toHaveBeenCalledWith('tenant-A', 'C123');
+      expect(unbindChannel).toHaveBeenCalledWith('tenant-A', 'C123', undefined);
+    });
+
+    it('exchanges a fresh UIAM token before unbinding a channel', async () => {
+      const { server, soClient, exchangeToken } = createHarnessWithChannelOps({
+        serviceAccountsEnabled: true,
+      });
+      soClient.get.mockResolvedValue({
+        attributes: {
+          status: RELAY_APP_CONNECTION_STATUS.connected,
+          serviceAccountId: 'sa-1',
+          tenantKey: 'tenant-A',
+        },
+      });
+      unbindChannel.mockResolvedValue(undefined);
+
+      await new SlackAppService(server).unbindChannel(request, 'C123');
+
+      expect(exchangeToken).toHaveBeenCalledWith('sa-1');
+      expect(unbindChannel).toHaveBeenCalledWith(
+        'tenant-A',
+        'C123',
+        'essu_service_account_token'
+      );
     });
   });
 
