@@ -1,5 +1,6 @@
 /*
- * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under the Elastic License
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
@@ -19,8 +20,8 @@ import type {
 
 import { SERVICE_ACCOUNT_TOKEN_RETRY_REUSE_MS } from './fake_requests';
 import { ServiceAccountTokenExchangeError } from './token_exchange_error';
-import { UiamServiceAccounts } from './uiam_service_accounts';
 import type { ListedServiceAccount } from './types';
+import { UiamServiceAccounts } from './uiam_service_accounts';
 import type { SecurityLicense } from '../../common';
 import { licenseMock } from '../../common/licensing/index.mock';
 import { SERVICE_ACCOUNT_MAX_STRING_FIELD_LENGTH } from '../../common/service_accounts';
@@ -133,23 +134,26 @@ describe('UiamServiceAccounts', () => {
       );
     });
 
-    it.each([true, false])('preserves API-key authentication when internal=%s', async (internal) => {
-      getCurrentUser.mockReturnValue(
-        mockAuthenticatedUser({
-          authentication_type: 'api_key',
-          api_key: { id: 'key-id', name: 'key-name', managed_by: 'cloud', internal },
-        })
-      );
-      mockUiam.createServiceAccount.mockResolvedValue(validResponse);
+    it.each([true, false])(
+      'preserves API-key authentication when internal=%s',
+      async (internal) => {
+        getCurrentUser.mockReturnValue(
+          mockAuthenticatedUser({
+            authentication_type: 'api_key',
+            api_key: { id: 'key-id', name: 'key-name', managed_by: 'cloud', internal },
+          })
+        );
+        mockUiam.createServiceAccount.mockResolvedValue(validResponse);
 
-      await serviceAccounts.create(createMockRequest('ApiKey essu_key'), createParams);
+        await serviceAccounts.create(createMockRequest('ApiKey essu_key'), createParams);
 
-      expect(mockUiam.createServiceAccount).toHaveBeenCalledWith(
-        new HTTPAuthorizationHeader('ApiKey', 'essu_key'),
-        expect.objectContaining({ organization_id: 'organization-id' }),
-        { includeClientAuthentication: internal }
-      );
-    });
+        expect(mockUiam.createServiceAccount).toHaveBeenCalledWith(
+          new HTTPAuthorizationHeader('ApiKey', 'essu_key'),
+          expect.objectContaining({ organization_id: 'organization-id' }),
+          { includeClientAuthentication: internal }
+        );
+      }
+    );
 
     it('rejects when security features are disabled in Elasticsearch', async () => {
       mockLicense.isEnabled.mockReturnValue(false);
@@ -278,11 +282,13 @@ describe('UiamServiceAccounts', () => {
     });
 
     it('rethrows upstream failures', async () => {
-      mockUiam.exchangeServiceAccountToken.mockRejectedValue(new Error('upstream exploded'));
+      const cause = new Error('upstream exploded');
+      mockUiam.exchangeServiceAccountToken.mockRejectedValue(cause);
 
-      await expect(serviceAccounts.exchangeToken('service-account-id')).rejects.toThrowError(
-        'upstream exploded'
-      );
+      await expect(serviceAccounts.exchangeToken('service-account-id')).rejects.toMatchObject({
+        cause,
+        retryable: false,
+      });
     });
   });
 

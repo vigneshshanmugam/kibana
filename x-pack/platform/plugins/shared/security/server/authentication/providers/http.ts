@@ -1,5 +1,6 @@
 /*
- * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under the Elastic License
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
@@ -108,18 +109,6 @@ export class HTTPAuthenticationProvider extends BaseAuthenticationProvider {
         return this.authenticateViaUiamOAuth(request, authorizationHeader);
       }
 
-      if (
-        !request.route.options.tags.includes(ROUTE_TAG_ACCEPT_UIAM_OAUTH) &&
-        !this.hasVerifiedInternalCallerAttestation(request, authorizationHeader)
-      ) {
-        this.logger.warn(
-          `Detected UIAM OAuth token on a non-MCP endpoint: ` +
-            `${request.route.method.toUpperCase()} ${request.route.path}. ` +
-            `OAuth tokens are only accepted on routes tagged with "${ROUTE_TAG_ACCEPT_UIAM_OAUTH}". ` +
-            `This may indicate a misconfigured MCP client or token misuse.`
-        );
-      }
-
       return this.authenticateViaUiamAccessToken(request, authorizationHeader);
     }
 
@@ -215,7 +204,9 @@ export class HTTPAuthenticationProvider extends BaseAuthenticationProvider {
     authorizationHeader: HTTPAuthorizationHeader
   ): Promise<AuthenticationResult> {
     try {
-      const authHeaders = this.options.uiam!.getAuthenticationHeaders(authorizationHeader.credentials);
+      const authHeaders = this.options.uiam!.getAuthenticationHeaders(
+        authorizationHeader.credentials
+      );
       const user = await this.getUser(request, authHeaders);
 
       this.logger.debug('Request authenticated via UIAM access token.');

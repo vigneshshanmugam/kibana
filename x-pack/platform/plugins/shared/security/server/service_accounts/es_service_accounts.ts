@@ -10,6 +10,7 @@ import Boom from '@hapi/boom';
 import type { KibanaRequest } from '@kbn/core/server';
 import type { ServiceAccount } from '@kbn/core-security-server';
 
+import { createNotImplementedWorkloadBindings } from './bindings';
 import type { ServiceAccountsBackend } from './types';
 
 /**
@@ -20,6 +21,8 @@ import type { ServiceAccountsBackend } from './types';
  * than something to be retrofitted later.
  */
 export class EsServiceAccounts implements ServiceAccountsBackend {
+  readonly workloads = createNotImplementedWorkloadBindings();
+
   async create(): Promise<ServiceAccount> {
     throw Boom.notImplemented('Creating Elasticsearch service accounts is not yet implemented');
   }

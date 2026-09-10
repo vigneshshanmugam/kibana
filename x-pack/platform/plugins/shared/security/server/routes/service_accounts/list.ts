@@ -29,7 +29,7 @@ export function defineListServiceAccountsRoute({
         authz: {
           enabled: false,
           reason:
-            "This route authorizes with Elasticsearch manage_security",
+            "This route authorizes with Elasticsearch manage_security; UIAM authorizes Kibana's own client credential against assumable_by",
         },
       },
       validate: { query: listServiceAccountsQuerySchema },

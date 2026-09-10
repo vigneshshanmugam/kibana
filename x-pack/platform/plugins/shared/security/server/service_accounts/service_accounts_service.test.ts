@@ -1,15 +1,17 @@
 /*
- * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under the Elastic License
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
 
 import { SavedObjectsErrorHelpers } from '@kbn/core/server';
-import { loggingSystemMock, savedObjectsServiceMock } from '@kbn/core/server/mocks';
+import { loggingSystemMock } from '@kbn/core/server/mocks';
 import { encryptedSavedObjectsMock } from '@kbn/encrypted-saved-objects-plugin/server/mocks';
 
 import { EsServiceAccounts } from './es_service_accounts';
 import { ServiceAccountsService } from './service_accounts_service';
+import type { ServiceAccountsServiceStartParams } from './service_accounts_service';
 import { UiamServiceAccounts } from './uiam_service_accounts';
 import { licenseMock } from '../../common/licensing/index.mock';
 import { ConfigSchema, createConfig } from '../config';
@@ -48,7 +50,9 @@ describe('ServiceAccountsService', () => {
         projectType: 'security' as const,
       },
       buildFlavor: 'serverless' as const,
-      savedObjects: savedObjectsServiceMock.createStartContract(),
+      savedObjects: {
+        getUnsafeInternalClient: jest.fn().mockReturnValue({}),
+      } as unknown as ServiceAccountsServiceStartParams['savedObjects'],
       encryptedSavedObjects,
       canEncrypt: true,
       getCurrentUser: jest.fn(),

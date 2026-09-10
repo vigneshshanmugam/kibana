@@ -1384,7 +1384,6 @@ export class UiamService implements UiamServicePublic {
     }
 
     const payload = await response.json();
-    console.log('payload', payload);
     const { code, message, resource, type }: UiamErrorDetails = payload?.error ?? {};
 
     // Build a compact, greppable summary for log output: `[code/type] message (resource: ...)`.

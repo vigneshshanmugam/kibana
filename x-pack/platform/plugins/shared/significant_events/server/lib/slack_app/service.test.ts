@@ -268,15 +268,15 @@ describe('SlackAppService', () => {
         const result = await new SlackAppService(server).connect(request);
 
         expect(createServiceAccount).toHaveBeenCalledWith(request, {
-          name: 'relay-kibana-sa-1',
+          name: 'relay-kibana-sa-2',
           assumable_by: [
-            { type: 'platform-service-account', service_account_id: 'relay-service' },
             {
               type: 'project-service-account',
               organization_id: 'org1234567890',
               project_type: 'elasticsearch',
               project_id: 'abcdef12345678901234567890123456',
             },
+            { type: 'platform-service-account', service_account_id: 'relay-service' },
           ],
         });
         expect(exchangeToken).toHaveBeenCalledWith('sa-1');
@@ -286,13 +286,13 @@ describe('SlackAppService', () => {
           expect.objectContaining({ uiam_service_account_id: 'sa-1' }),
           'essu_service_account_token'
         );
-        // The SO records the SA id (apiKeyId is null — no long-lived key).
+        // The SO records the SA id and no long-lived API key.
         expect(soClient.create).toHaveBeenCalledWith(
           RELAY_APP_CONNECTION_SO_TYPE,
           expect.objectContaining({
             status: RELAY_APP_CONNECTION_STATUS.oauthInProgress,
             serviceAccountId: 'sa-1',
-            apiKeyId: null,
+            apiKeyId: undefined,
             claimId: 'c-1',
           }),
           { id: RELAY_APP_CONNECTION_SO_ID, overwrite: true }
@@ -300,8 +300,8 @@ describe('SlackAppService', () => {
         expect(result).toEqual({ authorizeUrl: 'https://slack/oauth' });
       });
 
-      it('reuses a stored serviceAccountId on reconnect without creating a new account', async () => {
-        const { server, soClient, createServiceAccount } = createHarness({
+      it('reuses a stored serviceAccountId on reconnect and exchanges a fresh token', async () => {
+        const { server, soClient, createServiceAccount, exchangeToken } = createHarness({
           serviceAccountsEnabled: true,
         });
         soClient.get.mockResolvedValue({
@@ -319,9 +319,10 @@ describe('SlackAppService', () => {
         await new SlackAppService(server).connect(request);
 
         expect(createServiceAccount).not.toHaveBeenCalled();
+        expect(exchangeToken).toHaveBeenCalledWith('sa-existing');
         expect(startInstall).toHaveBeenCalledWith(
           expect.objectContaining({ uiam_service_account_id: 'sa-existing' }),
-          undefined
+          'essu_service_account_token'
         );
       });
 

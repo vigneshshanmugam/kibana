@@ -65,7 +65,6 @@ export class RelayClient implements RelayClientContract {
     body: RelayInstallRequest,
     bearerToken?: string
   ): Promise<RelayInstallResponse> {
-    console.log('bearerToken', bearerToken);
     const extraHeaders: Record<string, string> | undefined = bearerToken
       ? { Authorization: `Bearer ${bearerToken}` }
       : undefined;

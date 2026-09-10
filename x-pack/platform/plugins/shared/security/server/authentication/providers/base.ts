@@ -189,17 +189,12 @@ export abstract class BaseAuthenticationProvider<TState = unknown> {
             ? {
                 headers: {
                   ...request.headers,
-                  'X-Client-Sans': 'URI=spiffe://relay.elastic.co',
                   ...authHeaders,
                 },
               }
             : request
         )
         .asCurrentUser.security.authenticate()
-        .catch((error) => {
-          console.log(error);
-          throw error;
-        })
     );
   }
 

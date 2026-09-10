@@ -429,7 +429,7 @@ describe('HTTPAuthenticationProvider', () => {
       );
     });
 
-    it('does not intercept essu_ tokens on non-tagged routes (falls through to ES).', async () => {
+    it('authenticates essu_ tokens on non-tagged routes with UIAM auth headers.', async () => {
       const header = 'Bearer essu_some_token';
       const user = mockAuthenticatedUser();
 
@@ -452,11 +452,23 @@ describe('HTTPAuthenticationProvider', () => {
             authentication_provider: { type: 'http', name: 'http' },
             http_authentication_scheme: 'bearer',
           },
-          { authHeaders: { authorization: header } }
+          {
+            authHeaders: {
+              authorization: header,
+              [ES_CLIENT_AUTHENTICATION_HEADER]: 'some-shared-secret',
+            },
+          }
         )
       );
 
       expect(mockOptionsWithUiam.uiam!.exchangeOAuthToken).not.toHaveBeenCalled();
+      expect(mockOptionsWithUiam.client.asScoped).toHaveBeenCalledWith({
+        headers: {
+          ...request.headers,
+          authorization: header,
+          [ES_CLIENT_AUTHENTICATION_HEADER]: 'some-shared-secret',
+        },
+      });
     });
 
     it.each([undefined, 'valid-attestation', 'forged-attestation'])(
@@ -482,7 +494,13 @@ describe('HTTPAuthenticationProvider', () => {
         expect(logger.warn).not.toHaveBeenCalled();
         expect(uiam.getInternalCallerAttestationHeaders).not.toHaveBeenCalled();
         expect(uiam.exchangeOAuthToken).not.toHaveBeenCalled();
-        expectAuthenticateCall(client, request);
+        expectAuthenticateCall(client, {
+          headers: {
+            ...request.headers,
+            authorization: 'Bearer essu_service_account_token',
+            [ES_CLIENT_AUTHENTICATION_HEADER]: 'some-shared-secret',
+          },
+        });
       }
     );
 
@@ -508,12 +526,21 @@ describe('HTTPAuthenticationProvider', () => {
       });
       const result = await provider.authenticate(request);
       expect(result.succeeded()).toBe(true);
-      expect(result.authHeaders).toEqual({ authorization: header });
+      expect(result.authHeaders).toEqual({
+        authorization: header,
+        [ES_CLIENT_AUTHENTICATION_HEADER]: 'some-shared-secret',
+      });
       expect(uiam.exchangeOAuthToken).not.toHaveBeenCalled();
       expect(uiam.getInternalCallerAttestationHeaders).toHaveBeenCalledWith(
         expect.objectContaining({ credentials: 'essu_service_account_token' })
       );
-      expectAuthenticateCall(client, request);
+      expectAuthenticateCall(client, {
+        headers: {
+          ...request.headers,
+          authorization: header,
+          [ES_CLIENT_AUTHENTICATION_HEADER]: 'some-shared-secret',
+        },
+      });
     });
 
     it('authenticates service-account loopback credentials before and after refresh', async () => {
@@ -554,8 +581,17 @@ describe('HTTPAuthenticationProvider', () => {
         });
         const result = await provider.authenticate(request);
         expect(result.succeeded()).toBe(true);
-        expect(result.authHeaders).toEqual({ authorization: `Bearer ${token}` });
-        expect(client.asScoped).toHaveBeenLastCalledWith(request);
+        expect(result.authHeaders).toEqual({
+          authorization: `Bearer ${token}`,
+          [ES_CLIENT_AUTHENTICATION_HEADER]: 'some-shared-secret',
+        });
+        expect(client.asScoped).toHaveBeenLastCalledWith({
+          headers: {
+            ...request.headers,
+            authorization: `Bearer ${token}`,
+            [ES_CLIENT_AUTHENTICATION_HEADER]: 'some-shared-secret',
+          },
+        });
         if (token === 'essu_service_account_initial') {
           await registry.ensureFreshToken(fakeRequest, 0);
         }
@@ -594,7 +630,7 @@ describe('HTTPAuthenticationProvider', () => {
           supportedSchemes: new Set(['bearer']),
         });
         expect((await provider.authenticate(request)).succeeded()).toBe(true);
-        expect(uiam.exchangeOAuthToken).toHaveBeenCalledWith('essu_oauth_token');
+        expect(uiam.exchangeOAuthToken).toHaveBeenCalledWith('essu_oauth_token', undefined);
       }
     );
 
@@ -625,7 +661,7 @@ describe('HTTPAuthenticationProvider', () => {
         supportedSchemes: new Set(['bearer']),
       });
       expect((await provider.authenticate(request)).succeeded()).toBe(true);
-      expect(uiam.exchangeOAuthToken).toHaveBeenCalledWith('essu_oauth_token');
+      expect(uiam.exchangeOAuthToken).toHaveBeenCalledWith('essu_oauth_token', undefined);
     });
 
     it('does not intercept essu_ tokens when UIAM is not enabled.', async () => {

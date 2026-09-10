@@ -251,7 +251,7 @@ export class SlackAppService {
     let bearerToken: string | undefined;
 
     if (this.server.core.security.serviceAccounts.isEnabled()) {
-      if (false && existingConnection?.serviceAccountId) {
+      if (existingConnection?.serviceAccountId) {
         serviceAccountId = existingConnection.serviceAccountId;
         this.logger.debug(`Reusing existing UIAM service account ${serviceAccountId}`);
       } else {
@@ -277,13 +277,14 @@ export class SlackAppService {
           this.logger.error(`Failed to create UIAM service account: ${this.toErrorMessage(error)}`);
           throw error;
         }
-
-        const token = await this.server.core.security.serviceAccounts.exchangeToken(
-          serviceAccountId
-        );
-
-        bearerToken = token.token;
       }
+
+      if (!serviceAccountId) {
+        throw new Error('Unable to resolve UIAM service account id for Relay install');
+      }
+
+      const token = await this.server.core.security.serviceAccounts.exchangeToken(serviceAccountId);
+      bearerToken = token.token;
 
       try {
         installResponse = await relayClient.startInstall(
