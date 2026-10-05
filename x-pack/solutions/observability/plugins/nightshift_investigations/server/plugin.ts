@@ -19,6 +19,8 @@ import type { ZodObject } from '@kbn/zod/v4';
 import { SECURITY_EXTENSION_ID } from '@kbn/core-saved-objects-server';
 import { registerRoutes } from '@kbn/server-route-repository';
 import type { KibanaRequest } from '@kbn/core/server';
+import { firstValueFrom } from 'rxjs';
+import { NIGHTSHIFT_ENABLED_FLAG } from '@kbn/nightshift-shared';
 import { DEFAULT_SPACE_ID } from '@kbn/core-spaces-common';
 import type { AvailabilityConfig } from '@kbn/agent-builder-server';
 import type { WorkflowsExtensionsServerPluginStart } from '@kbn/workflows-extensions/server';
@@ -47,6 +49,9 @@ import { cortexOptimizeStepDefinition } from './step_definitions/cortex_optimize
 import { decisionTreeHydrateStepDefinition } from './step_definitions/decision_tree_hydrate';
 import { decisionTreePrepareStepDefinition } from './step_definitions/decision_tree_prepare';
 import { decisionTreeReinforceStepDefinition } from './step_definitions/decision_tree_reinforce';
+import { slackIntakeStepDefinition } from './step_definitions/slack_intake';
+import { createSlackIntakeDecider } from './slack_intake/decide_route';
+import { createAskSlackIntakeRoute } from './slack_intake/typesafe_client';
 import { memoryOptimizeStepDefinition } from './step_definitions/memory_optimize';
 import { createCortexStore, registerCortexAiIndex } from './cortex/register_cortex';
 import { registerMemoryAiIndex } from './memory/register_memory';
@@ -310,6 +315,28 @@ export class NightshiftInvestigationsPlugin
       }
     }
 
+    const slackIntakeConfig = this.ctx.config.get().slack_intake;
+    const slackIntakeLogger = this.logger.get('slack_intake');
+    const askSlackIntakeRoute = slackIntakeConfig.api_key
+      ? createAskSlackIntakeRoute({
+          apiKey: slackIntakeConfig.api_key,
+          baseUrl: slackIntakeConfig.base_url,
+          model: slackIntakeConfig.model,
+          timeoutMs: slackIntakeConfig.timeout_ms,
+        })
+      : undefined;
+    const decideSlackIntake = createSlackIntakeDecider({
+      // Same switch as the rest of Nightshift; no separate flag.
+      isEnabled: () =>
+        this.featureFlags
+          ? firstValueFrom(this.featureFlags.getBooleanValue$(NIGHTSHIFT_ENABLED_FLAG, false))
+          : Promise.resolve(false),
+      getAsk: () => askSlackIntakeRoute,
+      actThreshold: slackIntakeConfig.act_threshold,
+      timeoutMs: slackIntakeConfig.timeout_ms,
+      logger: slackIntakeLogger,
+    });
+
     if (plugins.workflowsManagement) {
       if (plugins.workflowsExtensions) {
         plugins.workflowsExtensions.registerStepDefinition(
@@ -365,6 +392,15 @@ export class NightshiftInvestigationsPlugin
             getSandboxStart: () => this.sandboxStart,
             logger: this.logger.get('decision_trees'),
             isEnabled: () => this.decisionTreesEnabled,
+          })
+        );
+        // Always registered so the managed Slack thread workflow never hits an unknown step type;
+        // while the Nightshift flag is off or no key is set the step records `skipped`.
+        plugins.workflowsExtensions.registerStepDefinition(
+          slackIntakeStepDefinition({
+            decide: decideSlackIntake,
+            getInvestigationsClient: this.getInvestigationsClient,
+            logger: slackIntakeLogger,
           })
         );
         plugins.workflowsExtensions.registerStepDefinition(

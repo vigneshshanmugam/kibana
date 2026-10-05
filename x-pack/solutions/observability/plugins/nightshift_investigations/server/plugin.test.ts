@@ -17,6 +17,7 @@ const createPlugin = (memoryEnabled = false) =>
       cortex: { enabled: false },
       decision_trees: { enabled: true },
       memory: { enabled: memoryEnabled },
+      slack_intake: { timeout_ms: 5_000, act_threshold: 0.8 },
     })
   );
 
@@ -62,6 +63,25 @@ describe('NightshiftInvestigationsPlugin setup', () => {
 
     expect(registerStepDefinition).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'nightshift.resolveModel' })
+    );
+  });
+
+  it('registers the Slack intake step even when it is disabled', () => {
+    const registerStepDefinition = jest.fn();
+    const dependencies = {
+      ...createSetupDeps(),
+      workflowsManagement: {},
+      workflowsExtensions: {
+        registerManagedWorkflowOwner: jest.fn(),
+        registerTriggerDefinition: jest.fn(),
+        registerStepDefinition,
+      },
+    } as unknown as NightshiftInvestigationsSetupDeps;
+
+    createPlugin().setup(coreMock.createSetup(), dependencies);
+
+    expect(registerStepDefinition).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'nightshift.slackIntake' })
     );
   });
 });

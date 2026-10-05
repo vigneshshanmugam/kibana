@@ -15,4 +15,17 @@ describe('Nightshift investigations configuration', () => {
   it('preserves an explicit Cortex opt-out', () => {
     expect(config.schema.validate({ cortex: { enabled: false } }).cortex.enabled).toBe(false);
   });
+
+  it('has no Slack intake key by default', () => {
+    expect(config.schema.validate({ cortex: {} }).slack_intake).toEqual({
+      timeout_ms: 5_000,
+      act_threshold: 0.8,
+    });
+  });
+
+  it('rejects an out-of-range Slack intake threshold', () => {
+    expect(() =>
+      config.schema.validate({ cortex: {}, slack_intake: { act_threshold: 1.5 } })
+    ).toThrow();
+  });
 });

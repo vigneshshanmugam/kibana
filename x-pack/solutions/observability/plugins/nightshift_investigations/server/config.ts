@@ -44,6 +44,21 @@ const memoryConfigSchema = schema.object({
   enabled: schema.boolean({ defaultValue: false }),
 });
 
+const slackIntakeConfigSchema = schema.object({
+  // Routes Slack messages with the TypeSafe decision model, under the Nightshift feature flag.
+  // Without a key the intake is skipped and the Slack thread workflow behaves as without a model.
+  // With a key, each message's text and the linked investigation's title, status and summary
+  // excerpt are sent to the TypeSafe endpoint.
+  // Explicit TypeSafe API key; a stopgap until the model is served through EIS.
+  api_key: schema.maybe(schema.string({ maxLength: 1024 })),
+  // TypeSafe-compatible endpoint (for example a self-hosted Kev). Defaults to the hosted API.
+  base_url: schema.maybe(schema.string({ maxLength: 2048 })),
+  model: schema.maybe(schema.string({ maxLength: 128 })),
+  timeout_ms: schema.number({ defaultValue: 5_000, min: 500, max: 30_000 }),
+  // Minimum probability of a non-ignore route before the gate counts it as one it would act on.
+  act_threshold: schema.number({ defaultValue: 0.8, min: 0, max: 1 }),
+});
+
 const configSchema = schema.object({
   // Reserved: Core skips loading this plugin entirely when false.
   enabled: schema.boolean({ defaultValue: true }),
@@ -51,6 +66,7 @@ const configSchema = schema.object({
   cortex: cortexConfigSchema,
   decision_trees: decisionTreesConfigSchema,
   memory: memoryConfigSchema,
+  slack_intake: slackIntakeConfigSchema,
 });
 
 export type NightshiftInvestigationsConfig = TypeOf<typeof configSchema>;

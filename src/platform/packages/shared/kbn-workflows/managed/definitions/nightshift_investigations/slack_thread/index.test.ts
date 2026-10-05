@@ -7,6 +7,7 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
+import { Liquid } from 'liquidjs';
 import { parse } from 'yaml';
 import { NIGHTSHIFT_SLACK_THREAD_WORKFLOW } from '.';
 import { NIGHTSHIFT_INVESTIGATION_WORKFLOW_ID } from '../investigation';
@@ -17,6 +18,7 @@ interface WorkflowStep {
   if?: string;
   condition?: string;
   with?: Record<string, unknown>;
+  'on-failure'?: Record<string, unknown>;
   steps?: WorkflowStep[];
 }
 
@@ -36,21 +38,73 @@ const requireStep = (name: string): WorkflowStep => {
 };
 
 describe('Nightshift Slack thread workflow', () => {
-  it('continues an existing investigation on human thread replies with text only', () => {
+  it('takes human messages with text, in a thread or not', () => {
     expect(workflow.triggers).toEqual([
       {
         type: 'slack2.message',
         'connector-id': 'elastic-apps-slack',
         on: {
           condition:
-            'event.threadId:* and event.workspace:* and event.text:* and not event.botId:* and (not event.subtype:* or event.subtype:thread_broadcast or event.subtype:file_share)',
+            'event.workspace:* and event.text:* and not event.botId:* and (not event.subtype:* or event.subtype:thread_broadcast or event.subtype:file_share)',
         },
       },
     ]);
-    expect(requireStep('find_investigation').with?.body).toMatchObject({
-      workspace: '${{ event.workspace }}',
-      create: false,
+  });
+
+  it('asks the intake model first, and carries on without it when it fails', () => {
+    expect(workflow.steps[0]).toMatchObject({
+      name: 'route_message',
+      type: 'nightshift.slackIntake',
+      with: { workspace: '${{ event.workspace }}', channel: '{{ event.channel }}' },
+      'on-failure': { continue: true },
     });
+  });
+
+  it.each([
+    ['continues a follow-up', { status: 'decided', action: 'continue_investigation' }, true, false],
+    [
+      'starts a new investigation',
+      { status: 'decided', action: 'start_investigation' },
+      true,
+      true,
+    ],
+    [
+      'leaves a message the model ignores alone',
+      { status: 'decided', action: 'none' },
+      false,
+      false,
+    ],
+    [
+      'leaves a redelivered root message alone',
+      { status: 'skipped', action: 'none', reason: 'already_investigated' },
+      false,
+      false,
+    ],
+    [
+      'carries on when the model is disabled',
+      { status: 'skipped', action: 'none', reason: 'disabled' },
+      true,
+      false,
+    ],
+    [
+      'carries on when the model errored',
+      { status: 'error', action: 'none', reason: 'timeout' },
+      true,
+      false,
+    ],
+    ['carries on when the step failed and has no output', undefined, true, false],
+  ])('%s', (_, output, expectedFinds, expectedCreates) => {
+    const liquid = new Liquid();
+    const evaluate = (expression: unknown): unknown =>
+      liquid.evalValueSync(String(expression).replace(/^\$\{\{|\}\}$/g, ''), {
+        steps: { route_message: { output } },
+      });
+    const findInvestigation = requireStep('find_investigation');
+
+    expect(evaluate(findInvestigation.if)).toBe(expectedFinds);
+    expect(evaluate((findInvestigation.with?.body as { create: string }).create)).toBe(
+      expectedCreates
+    );
   });
 
   it('records each delivered event for this execution and skips one another execution handled', () => {
